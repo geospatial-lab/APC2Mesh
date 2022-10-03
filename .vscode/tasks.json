@@ -18,6 +18,12 @@
         "type": "docker-run",
         "label": "docker-run: debug",
         "dependsOn": ["docker-build"],
+        "dockerRun":{
+          "volumes": [
+            {"localPath":"/mnt/data/rec_data","containerPath":"/data"},
+            {"localPath":"${PWD}/results","containerPath":"/results"}
+            ]
+          },
         "python": {
           "file": "sdf_try.py"
         }
