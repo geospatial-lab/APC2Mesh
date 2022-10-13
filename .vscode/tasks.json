@@ -21,6 +21,7 @@
         "dockerRun":{
           "volumes": [
             {"localPath":"/mnt/data/rec_data","containerPath":"/data"},
+            // {"localPath":"${PWD}/data","containerPath":"/data"},
             {"localPath":"${PWD}/results","containerPath":"/results"}
             ]
           },
