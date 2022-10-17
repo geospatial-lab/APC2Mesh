@@ -2,6 +2,15 @@ import numpy as np
 from base_utils import file_utils
 
 
+def load_xyz(file_path):
+    data = np.loadtxt(file_path).astype('float32')
+    nan_lines = np.isnan(data).any(axis=1)
+    num_nan_lines = np.sum(nan_lines)
+    if num_nan_lines > 0:
+        data = data[~nan_lines]  # filter rows with nan values
+        print('Ignored {} points containing NaN coordinates in point cloud {}'.format(num_nan_lines, file_path))
+    return data
+
 def write_xyz(file_path, points: np.ndarray, normals=None, colors=None):
     """
     Write point cloud file.

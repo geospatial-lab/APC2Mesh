@@ -4,7 +4,7 @@ import os, sys
 import trimesh
 import numpy as np
 sys.path.append('./base_utils')
-from base_utils import mp_utils, file_utils
+from base_utils import mp_utils, file_utils, point_cloud
 from mesh_to_sdf import get_surface_point_cloud
 
 def _clean_mesh(file_in, file_out, num_max_faces=None, enforce_solid=True):
@@ -83,7 +83,7 @@ def _normalize_mesh(file_in, file_out, trans_file_out):
     # translate to origin
     recenteredData = mesh.vertices - centroid
 
-    # scale to unit cube
+    # scale to unit sphere
     scale = np.abs(recenteredData).max() # multiply by 2 if u want range [-0.5, 0.5]
     normalized_data = np.divide(recenteredData, scale)
     outmesh = trimesh.Trimesh(vertices=normalized_data, faces=mesh.faces)
@@ -105,7 +105,7 @@ def normalize_meshes(in_dir, out_dir, trans_dir, dataset_dir, num_processes=1):
     :return:
     """
 
-    in_dir_abs = os.path.join("/"+dataset_dir, in_dir)
+    in_dir_abs = os.path.join(dataset_dir, in_dir)
     out_dir_abs = os.path.join(dataset_dir, out_dir)
     trans_dir_abs = os.path.join(dataset_dir, trans_dir)
 
@@ -123,7 +123,7 @@ def normalize_meshes(in_dir, out_dir, trans_dir, dataset_dir, num_processes=1):
         out_file_abs = os.path.join(out_dir_abs, f)
         trans_file_abs = os.path.join(trans_dir_abs, (f[:-4]+'.npz'))
 
-        if not file_utils.call_necessary(in_file_abs, out_file_abs, trans_file_abs):
+        if not file_utils.call_necessary(in_file_abs, out_file_abs):
             continue
 
         call_params += [(in_file_abs, out_file_abs, trans_file_abs)]
@@ -226,27 +226,101 @@ def get_sdf(in_dir, out_dir, dataset_dir, fix_sample_cnt, num_processes=1):
     mp_utils.start_process_pool(_get_sdf, call_params, num_processes)
 
 
+def _normalize_als(file_in, file_out, trsf_file, snt_file):
+    # Load back in
+    als_pnts = point_cloud.load_xyz(file_in)
+    trsf_params = np.load(trsf_file)  
+    scale = trsf_params['scale']
+
+    # translate als to mesh/sphere origin
+    translatedData = als_pnts[:,:3] - trsf_params['centroid']
+
+    # scale to unit sphere
+    normalized_data = np.divide(translatedData, scale)
+
+    #Todo: subsample (down or up) ALS points to fixed count
+    # if len(normalized_data) > 4096:
+    #     print(file_in, len(normalized_data))
+
+    # get sdf of unit als
+    mesh = trimesh.load(snt_file)
+
+    '''surf_instance contains various data, e.g. points, kd_tree, etc.'''
+    surf_instance = get_surface_point_cloud(mesh, 
+                                            surface_point_method='sample', 
+                                            bounding_radius=1, 
+                                            scan_count=30, 
+                                            scan_resolution=200, 
+                                            sample_point_count=40000, 
+                                            calculate_normals=True)
+
+    als_sdf = surf_instance.get_sdf_in_batches(normalized_data, use_depth_buffer=False)
+
+    np.savez(file_out, unit_als=normalized_data, unit_als_sdf=als_sdf) # Save to file
+
+def normalize_als(in_dir, trsf_dir, out_dir, snt_dir, dataset_dir, num_processes=1):
+
+    in_dir_abs = os.path.join(dataset_dir, in_dir)
+    out_dir_abs = os.path.join(dataset_dir, out_dir)
+    trsf_dir_abs = os.path.join(dataset_dir, trsf_dir)
+    snt_dir_abs = os.path.join(dataset_dir, snt_dir)
+
+    os.makedirs(out_dir_abs, exist_ok=True)
+
+    call_params = []
+
+    xyz_files = [f for f in os.listdir(in_dir_abs)
+                 if os.path.isfile(os.path.join(in_dir_abs, f))]
+
+    trsf_files = [os.path.splitext(f)[0] for f in os.listdir(trsf_dir_abs)
+                 if os.path.isfile(os.path.join(trsf_dir_abs, f))]
+
+    for fi, f in enumerate(xyz_files):
+        if not f[:-4] in trsf_files: # if trsf doesn't, then snt should be fine too.
+            print('WARNING: {}.npz is missing from the .xyz files list'.format(f[:-4]))
+            continue 
+        in_file_abs = os.path.join(in_dir_abs, f)
+        out_file_abs = os.path.join(out_dir_abs, (f[:-4]+'.npz'))
+        trsf_file_abs = os.path.join(trsf_dir_abs, (f[:-4]+'.npz'))
+        snt_file_abs = os.path.join(snt_dir_abs, (f[:-4]+'.obj'))
+
+        if not file_utils.call_necessary(in_file_abs, out_file_abs):
+            continue
+
+        call_params += [(in_file_abs, out_file_abs, trsf_file_abs, snt_file_abs)]
+
+    mp_utils.start_process_pool(_normalize_als, call_params, num_processes)
 
 
 def main():
-    dataset_dir = "data"
+    dataset_dir = "/data"
     num_processes = 8
     fix_sample_cnt = 4096
 
     # print("002 Try to repair meshes or filter broken ones. Ensure solid meshes for signed distance calculations")
     # # solid here means: watertight, consistent winding, outward facing normals
-    # clean_meshes(dataset_dir=dataset_dir, dir_in_meshes="image_1_mesh", dir_out="02_cleaned_ply", num_processes=num_processes)
+    # clean_meshes(dataset_dir=dataset_dir, dir_in_meshes="image_1_mesh", 
+    #              dir_out="02_cleaned_ply", num_processes=num_processes)
 
     print('003: scale and translate mesh, save transformation params.')
-    normalize_meshes(in_dir='image_1_mesh', out_dir='03_snt_ply', trans_dir='03_trsf_npz', dataset_dir=dataset_dir, num_processes=num_processes)
+    normalize_meshes(in_dir='image_1_mesh', out_dir='processed/%s/03_snt_obj'%(fix_sample_cnt), 
+                     trans_dir='processed/%s/03_trsf_npz'%(fix_sample_cnt), dataset_dir=dataset_dir, 
+                     num_processes=num_processes)
 
-    print('004a: generate signed distances')
-    get_sdf(in_dir='03_snt_ply', out_dir='04_sdf_npy', dataset_dir=dataset_dir, fix_sample_cnt=fix_sample_cnt, num_processes=num_processes)
+    print('004a: generate complete query points set and their signed distances')
+    get_sdf(in_dir='processed/%s/03_snt_obj'%(fix_sample_cnt), 
+            out_dir='processed/%s/04_query_npz'%(fix_sample_cnt), dataset_dir=dataset_dir, 
+            fix_sample_cnt=fix_sample_cnt, num_processes=num_processes)
 
-    print('004b: adjust als points according to unit sphere mesh transformation params.')
-    # complete it and see if it can be worked in to 004a
+    print('005b: adjust als points according to unit sphere mesh transformation params and compute sdf.')
+    normalize_als(in_dir='image_1_xyz', trsf_dir='processed/%s/03_trsf_npz'%(fix_sample_cnt), 
+                  out_dir='processed/%s/05_als_npz'%(fix_sample_cnt), snt_dir='processed/%s/03_snt_obj'%(fix_sample_cnt),
+                  dataset_dir=dataset_dir, num_processes=num_processes)
+
+    print('done...')
 
 if __name__ == "__main__":
     main()
+
     '''even after mounting volumes, u need to sudo chown -R <user:group> of non-container mount folders'''
-    # os.system('cp -r /app/data/ /data/processed') # change folder 'cd' -> 'processed'
+    # os.system('cp -r /app/data/ /data/processed') # no need,fixed 
