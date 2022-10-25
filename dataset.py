@@ -40,8 +40,8 @@ class OurDataset(data.Dataset):
 
             self.points = np.concatenate(points, 0)
             self.sdf = np.concatenate(sdf, 0)
-            # self.als_points = np.concatenate(als_points, 0) # issue of non-fixed npoints. resolve in sdf_try.py
-            # self.als_sdf = np.concatenate(als_sdf, 0)
+            self.als_points = np.concatenate(als_points, 0) # FIXME: issue of non-fixed npoints. resolve in sdf_try.py
+            self.als_sdf = np.concatenate(als_sdf, 0)
         else:
             # load test split
             for file in complete_ts_list:
@@ -73,22 +73,22 @@ class OurDataset(data.Dataset):
     def __getitem__(self, index):
         points = torch.from_numpy((self.points[index]))
         sdf = torch.from_numpy((self.sdf[index]))
-        # als_points = torch.from_numpy((self.als_points[index]))
-        # als_sdf = torch.from_numpy((self.als_sdf[index]))
-        return points, sdf #, als_points, als_sdf
+        als_points = torch.from_numpy((self.als_points[index]))
+        als_sdf = torch.from_numpy((self.als_sdf[index]))
+        return points, sdf, als_points, als_sdf
 
-BuildingDataset = OurDataset()
-tr_loader = data.DataLoader(BuildingDataset, batch_size=8, shuffle=True)
-print('Length of train dataset:', len(BuildingDataset))
+# BuildingDataset = OurDataset()
+# tr_loader = data.DataLoader(BuildingDataset, batch_size=8, shuffle=True)
+# print('Length of train dataset:', len(BuildingDataset))
 
-for data in tr_loader:
-    print('Number of points:', len(data))
-    print('shape of points:', data[0].shape)
-    print('sdf shape:', data[1].shape)
-    # print('shape of als_points:', data[2].shape)
-    # print('als_sdf shape:', data[3].shape)
+# for data in tr_loader:
+#     print('Number of points:', len(data))
+#     print('shape of points:', data[0].shape)
+#     print('sdf shape:', data[1].shape)
+#     print('shape of als_points:', data[2].shape)
+#     print('als_sdf shape:', data[3].shape)
 
-#     break
-pass
+# #     break
+# pass
 
-print('done ...')
+# print('done ...')

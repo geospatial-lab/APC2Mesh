@@ -1,4 +1,5 @@
 '''Data Prepation'''
+from math import remainder
 import os, sys
 #os.environ['PYOPENGL_PLATFORM'] = 'egl'
 import trimesh
@@ -6,6 +7,7 @@ import numpy as np
 sys.path.append('./base_utils')
 from base_utils import mp_utils, file_utils, point_cloud
 from mesh_to_sdf import get_surface_point_cloud
+from scipy.spatial import cKDTree
 
 def _clean_mesh(file_in, file_out, num_max_faces=None, enforce_solid=True):
     
@@ -226,7 +228,7 @@ def get_sdf(in_dir, out_dir, dataset_dir, fix_sample_cnt, num_processes=1):
     mp_utils.start_process_pool(_get_sdf, call_params, num_processes)
 
 
-def _normalize_als(file_in, file_out, trsf_file, snt_file):
+def _normalize_als(file_in, file_out, trsf_file, snt_file, fix_sample_cnt):
     # Load back in
     als_pnts = point_cloud.load_xyz(file_in)
     trsf_params = np.load(trsf_file)  
@@ -238,9 +240,41 @@ def _normalize_als(file_in, file_out, trsf_file, snt_file):
     # scale to unit sphere
     normalized_data = np.divide(translatedData, scale)
 
-    #Todo: subsample (down or up) ALS points to fixed count
-    # if len(normalized_data) > 4096:
-    #     print(file_in, len(normalized_data))
+    # subsample (down or up) ALS points to fixed count
+    if len(normalized_data) > fix_sample_cnt:
+        # use fps to reduce points to fixed number
+        normalized_data = np.expand_dims(normalized_data, axis=0)
+        fps_idx = farthest_point_sample(normalized_data , fix_sample_cnt)
+        fix_pnts = index_points(normalized_data , fps_idx)
+        normalized_data = np.squeeze(fix_pnts)
+    elif len(normalized_data) < fix_sample_cnt:
+        remainder = fix_sample_cnt - len(normalized_data)
+        k = 5
+        # upsample via k nearest neighbors
+        while remainder != 0:
+            tree = cKDTree(normalized_data)
+            _, indexes = tree.query(normalized_data, k=k)
+
+            normalized_data = np.expand_dims(normalized_data, axis=0)
+            indexes = np.expand_dims(indexes, axis=0)
+            bs = indexes.shape[0]
+            id_0 = np.arange(bs).reshape(-1, 1, 1)
+            k_groups = normalized_data[id_0, indexes]
+            k_grp_centers = k_groups.mean(2).squeeze()
+            normalized_data = normalized_data.squeeze()
+            print(normalized_data.shape, k_grp_centers.shape)
+            # noise = np.random.normal(0,0.1,[5,3])
+
+            if (len(normalized_data) + len(k_grp_centers)) > fix_sample_cnt or (len(normalized_data) + len(k_grp_centers)) == fix_sample_cnt:
+                normalized_data = np.concatenate((normalized_data, k_grp_centers[:remainder,:]), axis=0)
+                print("full", normalized_data.shape)
+                remainder = 0
+
+            else:
+                normalized_data = np.concatenate((normalized_data, k_grp_centers), axis=0)
+                print("part", len(normalized_data))
+                remainder = fix_sample_cnt - len(normalized_data)
+                k = k + 3
 
     # get sdf of unit als
     mesh = trimesh.load(snt_file)
@@ -258,7 +292,7 @@ def _normalize_als(file_in, file_out, trsf_file, snt_file):
 
     np.savez(file_out, unit_als=normalized_data, unit_als_sdf=als_sdf) # Save to file
 
-def normalize_als(in_dir, trsf_dir, out_dir, snt_dir, dataset_dir, num_processes=1):
+def normalize_als(in_dir, trsf_dir, out_dir, snt_dir, dataset_dir, fixed_cnt=2048, num_processes=1):
 
     in_dir_abs = os.path.join(dataset_dir, in_dir)
     out_dir_abs = os.path.join(dataset_dir, out_dir)
@@ -287,7 +321,7 @@ def normalize_als(in_dir, trsf_dir, out_dir, snt_dir, dataset_dir, num_processes
         if not file_utils.call_necessary(in_file_abs, out_file_abs):
             continue
 
-        call_params += [(in_file_abs, out_file_abs, trsf_file_abs, snt_file_abs)]
+        call_params += [(in_file_abs, out_file_abs, trsf_file_abs, snt_file_abs, fixed_cnt)]
 
     mp_utils.start_process_pool(_normalize_als, call_params, num_processes)
 
@@ -295,7 +329,7 @@ def normalize_als(in_dir, trsf_dir, out_dir, snt_dir, dataset_dir, num_processes
 def main():
     dataset_dir = "/data"
     num_processes = 8
-    fix_sample_cnt = 4096
+    fix_sample_cnt = 2048
 
     # print("002 Try to repair meshes or filter broken ones. Ensure solid meshes for signed distance calculations")
     # # solid here means: watertight, consistent winding, outward facing normals
@@ -315,7 +349,7 @@ def main():
     print('005b: adjust als points according to unit sphere mesh transformation params and compute sdf.')
     normalize_als(in_dir='image_1_xyz', trsf_dir='processed/%s/03_trsf_npz'%(fix_sample_cnt), 
                   out_dir='processed/%s/05_als_npz'%(fix_sample_cnt), snt_dir='processed/%s/03_snt_obj'%(fix_sample_cnt),
-                  dataset_dir=dataset_dir, num_processes=num_processes)
+                  dataset_dir=dataset_dir, fixed_cnt=fix_sample_cnt, num_processes=num_processes)
 
     print('done...')
 

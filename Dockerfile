@@ -97,7 +97,7 @@ RUN APT_INSTALL="apt-get install -y --no-install-recommends" && \
 # ------------------------------------------------------------------
     $PIP_INSTALL \
         numpy \
-        torch==1.7.1+cu110 torchvision==0.8.2+cu110 -f https://download.pytorch.org/whl/torch_stable.html \
+        torch==1.11.0+cu113 torchvision==0.12.0+cu113 -f https://download.pytorch.org/whl/torch_stable.html \
         scipy \
         matplotlib \
         Cython \
@@ -149,7 +149,11 @@ RUN APT_INSTALL="apt-get install -y --no-install-recommends" && \
 
 RUN PIP_INSTALL="python -m pip --no-cache-dir install --upgrade" && \
     $PIP_INSTALL \
-        mesh-to-sdf 
+        mesh-to-sdf \
+        torch-scatter -f https://data.pyg.org/whl/torch-1.11.0+cu113.html \
+        torch-sparse -f https://data.pyg.org/whl/torch-1.11.0+cu113.html \
+        torch-geometric \
+        torch-cluster -f https://data.pyg.org/whl/torch-1.11.0+cu113.html 
     # && \
 # # Install osmesa from source
 #     wget https://archive.mesa3d.org/mesa-18.3.3.tar.gz && \
@@ -179,12 +183,13 @@ RUN PIP_INSTALL="python -m pip --no-cache-dir install --upgrade" && \
 
 # Install pyopengl from github
 # RUN pip uninstall pyopengl
-# RUN PIP_INSTALL="python -m pip --no-cache-dir install --upgrade" && \
-#     GIT_CLONE="git clone --depth 10" && \
-#     $GIT_CLONE \
-#         https://github.com/mmatl/pyopengl.git && \
-#     $PIP_INSTALL \
-#         ./pyopengl 
+RUN PIP_INSTALL="python -m pip --no-cache-dir install --upgrade" && \
+    GIT_CLONE="git clone --recurse-submodules" && \
+    $GIT_CLONE \
+        https://github.com/rubenwiersma/deltaconv.git && \
+    cd deltaconv && \
+    $PIP_INSTALL \
+        ./ 
         # pyOpenGL_accelerate
 
 # ENV PATH="$PATH:/usr/lib/llvm-6.0/bin"
@@ -200,4 +205,4 @@ COPY . /app
 RUN adduser -u 5678 --disabled-password --gecos "" appuser && chown -R appuser /app
 USER appuser
 
-CMD ["python", "dataset.py "]
+CMD ["python", "network.py "]
