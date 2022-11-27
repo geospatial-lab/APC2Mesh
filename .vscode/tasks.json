@@ -8,8 +8,9 @@
         "dockerBuild": {
             "tag": "testdocker:latest",
             "buildArgs":{"IMAGE_NAME":"nvidia/cuda",
-            "TARGETARCH":"amd64"},
-            "dockerfile": "${workspaceFolder}/Dockerfile",
+            "TARGETARCH":"x86_64"
+            },
+            "dockerfile": "${workspaceFolder}/Dockerfile20",
             "context": "${workspaceFolder}",
             "pull":true
         }
@@ -19,6 +20,7 @@
         "label": "docker-run: debug",
         "dependsOn": ["docker-build"],
         "dockerRun":{
+          "customOptions":"--gpus all",
           "volumes": [
             {"localPath":"/mnt/data/rec_data","containerPath":"/data"},
             // {"localPath":"${PWD}/data","containerPath":"/data"},
@@ -26,7 +28,7 @@
             ]
           },
         "python": {
-          "file": "network.py"
+          "file": "main.py"
         }
       }
   ]

@@ -1,94 +1,65 @@
-import os, random
+import os
 import numpy as np
+import trimesh
+import uuid
 import torch
-from torch.utils import data
 
-class OurDataset(data.Dataset):
-    def __init__(self, train=True, npoints=4096, test_split_cnt=40):
-        self.data_path = '/data/processed/%d' %(npoints)
-        self.complete_path = os.path.join(self.data_path, '04_query_npz')
-        self.partial_path = os.path.join(self.data_path, '05_als_npz')
+MANIFOLD_SOFTWARE_DIR = "/Manifold/build"
 
-        """train/test split"""
-        complete_filelist = os.listdir(self.complete_path)
-        partial_filelist = os.listdir(self.partial_path)
 
-        assert len(complete_filelist) == len(partial_filelist), "partial and complete filelist count not the same, check!"
+def random_file_name(ext, prefix="tmp_"):
+    return f"{prefix}{uuid.uuid4()}.{ext}"
 
-        test_idx = random.sample(range(0, len(complete_filelist)), test_split_cnt)
 
-        # make files in both lists hold the same sequence
+def remesh(hull_mesh, num_faces):
 
-        complete_tr_list, complete_ts_list = self.nonIdxSelect(complete_filelist, test_idx)
-        partial_tr_list, partial_ts_list = self.nonIdxSelect(partial_filelist, test_idx)
+    # Write the original mesh as OBJ.
+    original_file = random_file_name("obj")
+    with open(original_file, "w") as f:
+        mesh = trimesh.Trimesh(vertices=hull_mesh.vertices, faces=hull_mesh.faces)
+        f.write(trimesh.exchange.obj.export_obj(mesh))
 
-        if train:
-            # load train split
-            points = []
-            sdf = []
-            for file in complete_tr_list:
-                comp_data = np.load(os.path.join(self.complete_path, file))  
-                points.append(np.expand_dims(comp_data['query_pnts'], axis=0))
-                sdf.append(np.expand_dims(comp_data['query_sdf'], axis=0))
+    # Create a manifold of the original file.
+    manifold_file = random_file_name("obj")
+    manifold_script_path = os.path.join(MANIFOLD_SOFTWARE_DIR, "manifold")
+    cmd = f"{manifold_script_path} {original_file} {manifold_file}"
+    os.system(cmd)
 
-            als_points = []
-            als_sdf = []
-            for file in partial_tr_list:
-                part_data = np.load(os.path.join(self.partial_path, file))  
-                als_points.append(np.expand_dims(part_data['unit_als'], axis=0))
-                als_sdf.append(np.expand_dims(part_data['unit_als_sdf'], axis=0))
+    # Simplify the manifold.
+    simplified_file = random_file_name("obj")
+    simplify_script_path = os.path.join(MANIFOLD_SOFTWARE_DIR, "simplify")
+    cmd = (
+        f"{simplify_script_path} -i {manifold_file} -o {simplified_file} -f {num_faces}"
+    )
+    os.system(cmd)
 
-            self.points = np.concatenate(points, 0)
-            self.sdf = np.concatenate(sdf, 0)
-            self.als_points = np.concatenate(als_points, 0) # FIXME: issue of non-fixed npoints. resolve in sdf_try.py
-            self.als_sdf = np.concatenate(als_sdf, 0)
-        else:
-            # load test split
-            for file in complete_ts_list:
-                comp_data = np.load(os.path.join(self.complete_path, file)) 
-                # self.points = comp_data['query_pnts']
-                # self.sdf = comp_data['query_sdf']
+    # Read the simplified manifold.
+    with open(simplified_file, "r") as f:
+        mesh = trimesh.exchange.obj.load_obj(f)
 
-            for file in partial_ts_list:
-                part_data = np.load(os.path.join(self.partial_path, file))  
-                # self.als_points = part_data['unit_als']
-                # self.als_sdf = part_data['unit_als_sdf']
+    # Prevent file spam.
+    os.remove(original_file)
+    os.remove(manifold_file)
+    os.remove(simplified_file)
 
-        self.npoints = npoints
-        self.train = train
+    return mesh["vertices"], mesh["faces"]
 
-    def nonIdxSelect(self, list_var, idx):
-        list_var.sort()
-        list2arr = np.asarray(list_var)
-        mask = np.ones(len(list_var), dtype=bool)
-        mask[idx] = False
-        return list2arr[mask], list2arr[~mask]
 
-    def __len__(self):
-        if self.train:
-            return self.points.shape[0]
-        else:
-           return self.als_points.shape[0]
+data_path = '/data/processed/%d' %(4096)
+complete_path = os.path.join(data_path, '04_query_npz')
+partial_path = os.path.join(data_path, '05_als_npz')
 
-    def __getitem__(self, index):
-        points = torch.from_numpy((self.points[index]))
-        sdf = torch.from_numpy((self.sdf[index]))
-        als_points = torch.from_numpy((self.als_points[index]))
-        als_sdf = torch.from_numpy((self.als_sdf[index]))
-        return points, sdf, als_points, als_sdf
+# complete_filelist = os.listdir(complete_path)
+partial_filelist = os.listdir(partial_path)
 
-# BuildingDataset = OurDataset()
-# tr_loader = data.DataLoader(BuildingDataset, batch_size=8, shuffle=True)
-# print('Length of train dataset:', len(BuildingDataset))
+trial_filelist = partial_filelist[:10]
 
-# for data in tr_loader:
-#     print('Number of points:', len(data))
-#     print('shape of points:', data[0].shape)
-#     print('sdf shape:', data[1].shape)
-#     print('shape of als_points:', data[2].shape)
-#     print('als_sdf shape:', data[3].shape)
+datalist = []
+num_faces = 2000
 
-# #     break
-# pass
-
-# print('done ...')
+for i in range(len(trial_filelist)):
+    part_data = np.load(os.path.join(partial_path, trial_filelist[i]))
+    xyz = part_data['unit_als']
+    hull_mesh = trimesh.convex.convex_hull(xyz)
+    # vs, faces = m.vertices, m.faces
+    mesh = remesh(hull_mesh, num_faces)

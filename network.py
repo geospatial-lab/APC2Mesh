@@ -1,4 +1,4 @@
-from dataset import OurDataset
+from dataset0 import OurDataset
 from torch.utils import data
 from torch import nn
 import torch
@@ -34,17 +34,18 @@ class Net(nn.Module):
                                         )
                                 )
 
-    def forword(self, x):
-        points = data[0]
-        als_ppoints = data[2]
-        pos = torch.cat([points,als_ppoints], axis=0)
+    def forward(self, x):
+        points = x[0]
+        als_ppoints = x[2]
+        pos = torch.cat([points,als_ppoints], axis=1)
 
         """Operator construction"""
         # Create a kNN graph, which is used to:
         # 1) Perform maximum aggregation in the scalar stream.
         # 2) Approximate the gradient and divergence oeprators
         # TODO: try to incorporate attention-based aggregation instead of max or mean.
-        edge_index = knn_graph(pos, self.k, batch=None, loop=True, flow='target_to_source')
+        batch = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0])
+        edge_index = knn_graph(pos, self.k, batch=batch, loop=True, flow='target_to_source')
 
         # Use the normals provided by the data or estimate a normal from the data.
         #   It is advised to estimate normals as a pre-transform.
@@ -83,7 +84,8 @@ model = Net(3, [64,128,256], 2, 16, 0.003, 1, True)
 # Determine the device to run the experiment on.
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 for i, data in enumerate(tr_loader):
-    data = data.to(device)
+    data[0] = data[0].to(device)
+    data[2] = data[2].to(device)
     output = model(data)
 
     print('done !!')
