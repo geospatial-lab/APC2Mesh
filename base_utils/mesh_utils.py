@@ -112,3 +112,83 @@ def build_v(x, meshes):
     nvs = mesh.nvs
     vs = vs_sum / nvs[None, :, None]
     return vs
+
+def face_areas_normals(faces, vs):
+    face_normals = torch.cross(vs[:, faces[:, 1], :] - vs[:, faces[:, 0], :],
+                               vs[:, faces[:, 2], :] - vs[:, faces[:, 1], :], dim=2)
+    face_areas = torch.norm(face_normals, dim=2)
+    face_normals = face_normals / face_areas[:, :, None]
+    face_areas = 0.5*face_areas
+    return face_areas, face_normals
+
+def sample_surface(faces, vs, count):  # sample from a surf., like in trimesh.sample --> points & their normals
+    """
+    sample mesh surface
+    sample method:
+    http://mathworld.wolfram.com/TrianglePointPicking.html
+  
+  Args
+    ---------
+    vs: vertices
+    faces: triangle faces (torch.long)
+    count: number of samples
+    Return
+    ---------
+    samples: (count, 3) points in space on the surface of mesh
+    normals: (count, 3) corresponding face normals for points
+    """
+    bsize, nvs, _ = vs.shape
+    weights, normal = face_areas_normals(faces, vs)
+    weights_sum = torch.sum(weights, dim=1)
+    dist = torch.distributions.categorical.Categorical(probs=weights / weights_sum[:, None])
+    face_index = dist.sample((count,))
+
+    # pull triangles into the form of an origin + 2 vectors
+    tri_origins = vs[:, faces[:, 0], :]
+    tri_vectors = vs[:, faces[:, 1:], :].clone()
+    tri_vectors -= tri_origins.repeat(1, 1, 2).reshape((bsize, len(faces), 2, 3))
+
+    # pull the vectors for the faces we are going to sample from
+    face_index = face_index.transpose(0, 1)
+    face_index = face_index[:, :, None].expand((bsize, count, 3))
+    tri_origins = torch.gather(tri_origins, dim=1, index=face_index)
+    face_index2 = face_index[:, :, None, :].expand((bsize, count, 2, 3))
+    tri_vectors = torch.gather(tri_vectors, dim=1, index=face_index2)
+
+    # randomly generate two 0-1 scalar components to multiply edge vectors by
+    random_lengths = torch.rand(count, 2, 1, device=vs.device, dtype=tri_vectors.dtype)
+
+    # points will be distributed on a quadrilateral if we use 2x [0-1] samples
+    # if the two scalar components sum less than 1.0 the point will be
+    # inside the triangle, so we find vectors longer than 1.0 and
+    # transform them to be inside the triangle
+    random_test = random_lengths.sum(dim=1).reshape(-1) > 1.0
+    random_lengths[random_test] -= 1.0
+    random_lengths = torch.abs(random_lengths)
+
+    # multiply triangle edge vectors by the random lengths and sum
+    sample_vector = (tri_vectors * random_lengths[None, :]).sum(dim=2)
+
+    # finally, offset by the origin to generate
+    # (n,3) points in space on the triangle
+    samples = sample_vector + tri_origins
+
+    normals = torch.gather(normal, dim=1, index=face_index)
+
+    return samples, normals
+
+def mesh_area(mesh):
+    vs = mesh.vs
+    faces = mesh.faces
+    v1 = vs[faces[:, 1]] - vs[faces[:, 0]]
+    v2 = vs[faces[:, 2]] - vs[faces[:, 0]]
+    area = torch.cross(v1, v2, dim=-1).norm(dim=-1)
+    return area
+
+def local_nonuniform_penalty(mesh):  #it has to do with the local variations in neighboring faces properties & penalizing that diff
+    # non-uniform penalty
+    area = mesh_area(mesh)
+    diff = area[mesh.gfmm][:, 0:1] - area[mesh.gfmm][:, 1:]
+    penalty = torch.norm(diff, dim=1, p=1)
+    loss = penalty.sum() / penalty.numel()
+    return loss

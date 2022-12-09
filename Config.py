@@ -17,7 +17,7 @@ class Args(object):
     torch_seed = 5
     samples = 15000  # number of points to sample reconstruction with ???
     initial_mesh = None  # if available, replace this with path
-    initial_num_faces = 2000
+    initial_num_faces = 8000
     init_samples = 10000
     iterations = 1000
     upsamp = 1000  # upsample each {upsamp}th iteration
@@ -35,8 +35,8 @@ class Args(object):
     pools = [0.0, 0.0, 0.0, 0.0]  # percent to pool from orig. resolution in each layer')
     transfer_data = True
     overlap = 0  # overlap for bfs
-    global_step = True  #perform the optimization step after all the parts are forwarded (only matters if nparts > 2)
-    manifold_res = 50000  # resolution for manifold upsampling
+    global_step = False  #perform the optimization step after all the parts are forwarded (only matters if nparts > 2)
+    manifold_res = 20000  # resolution for manifold upsampling
     unoriented = True  # take the normals loss term without any preferred orientation
     init_weights = 0.002
     export_interval = 100
@@ -56,5 +56,5 @@ def dtype():
     return torch.float32
 
 def get_num_samples(Args, cur_iter):
-    slope = (Args.samples - Args.begin_samples) / int(0.8 * Args.upsamp)
-    return int(slope * min(cur_iter, 0.8 * Args.upsamp)) + Args.begin_samples
+    slope = (Args.samples - Args.init_samples) / int(0.8 * Args.upsamp)
+    return int(slope * min(cur_iter, 0.8 * Args.upsamp)) + Args.init_samples

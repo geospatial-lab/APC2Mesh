@@ -24,11 +24,11 @@
           "volumes": [
             {"localPath":"/mnt/data/rec_data","containerPath":"/data"},
             // {"localPath":"${PWD}/data","containerPath":"/data"},
-            {"localPath":"${PWD}/results","containerPath":"/results"}
+            {"localPath":"/home/hope/reconstruction/results","containerPath":"/results"}
             ]
           },
         "python": {
-          "file": "main.py"
+          "file": "main_pcc.py"
         }
       }
   ]

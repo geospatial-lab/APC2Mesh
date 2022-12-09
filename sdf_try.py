@@ -1,13 +1,14 @@
 '''Data Prepation'''
 from math import remainder
 import os, sys
-#os.environ['PYOPENGL_PLATFORM'] = 'egl'
 import trimesh
 import numpy as np
 sys.path.append('./base_utils')
 from base_utils import mp_utils, file_utils, point_cloud
 from mesh_to_sdf import get_surface_point_cloud
 from scipy.spatial import cKDTree
+import torch
+from pytorch3d.ops import estimate_pointcloud_normals
 
 def _clean_mesh(file_in, file_out, num_max_faces=None, enforce_solid=True):
     
@@ -288,7 +289,14 @@ def _normalize_als(file_in, file_out, trsf_file, snt_file, fix_sample_cnt):
                                             sample_point_count=40000, 
                                             calculate_normals=True)
 
-    als_sdf = surf_instance.get_sdf_in_batches(normalized_data, use_depth_buffer=False)
+    als_sdf = surf_instance.get_sdf_in_batches(normalized_data, use_depth_buffer=False, return_gradients=False)
+
+    """compute normals."""
+    normals = estimate_pointcloud_normals(torch.from_numpy(np.expand_dims(normalized_data, axis=0)).float(), 15, True)
+    # pcd = o3d.geometry.PointCloud()
+    # pcd.points = o3d.utility.Vector3dVector(normalized_data)
+    # pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=10))
+    normalized_data = np.column_stack([normalized_data, normals.numpy().squeeze()])
 
     np.savez(file_out, unit_als=normalized_data, unit_als_sdf=als_sdf) # Save to file
 
@@ -329,27 +337,27 @@ def normalize_als(in_dir, trsf_dir, out_dir, snt_dir, dataset_dir, fixed_cnt=204
 def main():
     dataset_dir = "/data"
     num_processes = 8
-    fix_sample_cnt = 2048
+    fix_sample_cnt = 4096
 
     # print("002 Try to repair meshes or filter broken ones. Ensure solid meshes for signed distance calculations")
     # # solid here means: watertight, consistent winding, outward facing normals
     # clean_meshes(dataset_dir=dataset_dir, dir_in_meshes="image_1_mesh", 
     #              dir_out="02_cleaned_ply", num_processes=num_processes)
 
-    print('003: scale and translate mesh, save transformation params.')
-    normalize_meshes(in_dir='image_1_mesh', out_dir='processed/%s/03_snt_obj'%(fix_sample_cnt), 
-                     trans_dir='processed/%s/03_trsf_npz'%(fix_sample_cnt), dataset_dir=dataset_dir, 
-                     num_processes=num_processes)
+    # print('003: scale and translate mesh, save transformation params.')
+    # normalize_meshes(in_dir='image_1_mesh', out_dir='processed/%s/03_snt_obj'%(fix_sample_cnt), 
+    #                  trans_dir='processed/%s/03_trsf_npz'%(fix_sample_cnt), dataset_dir=dataset_dir, 
+    #                  num_processes=num_processes)
 
-    print('004a: generate complete query points set and their signed distances')
-    get_sdf(in_dir='processed/%s/03_snt_obj'%(fix_sample_cnt), 
-            out_dir='processed/%s/04_query_npz'%(fix_sample_cnt), dataset_dir=dataset_dir, 
-            fix_sample_cnt=fix_sample_cnt, num_processes=num_processes)
+    # print('004a: generate complete query points set and their signed distances')
+    # get_sdf(in_dir='processed/%s/03_snt_obj'%(fix_sample_cnt), 
+    #         out_dir='processed/%s/04_query_npz'%(fix_sample_cnt), dataset_dir=dataset_dir, 
+    #         fix_sample_cnt=fix_sample_cnt, num_processes=num_processes)
 
     print('005b: adjust als points according to unit sphere mesh transformation params and compute sdf.')
     normalize_als(in_dir='image_1_xyz', trsf_dir='processed/%s/03_trsf_npz'%(fix_sample_cnt), 
                   out_dir='processed/%s/05_als_npz'%(fix_sample_cnt), snt_dir='processed/%s/03_snt_obj'%(fix_sample_cnt),
-                  dataset_dir=dataset_dir, fixed_cnt=fix_sample_cnt, num_processes=num_processes)
+                  dataset_dir=dataset_dir, fixed_cnt=fix_sample_cnt, num_processes=1)
 
     print('done...')
 

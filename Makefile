@@ -3,6 +3,9 @@ clean:
 build:
 	docker build --build-arg IMAGE_NAME=nvidia/cuda -t sampledocker .
 
+cleandangling:
+  docker rmi -f $(docker images -f "dangling=true" -q)
+
 run:
 	docker run -it \
         --runtime=nvidia \
