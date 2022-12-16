@@ -197,6 +197,7 @@ RUN APT_INSTALL="apt-get install -y --no-install-recommends" && \
     rm -rf /var/lib/apt/lists/* /tmp/* ~/*
 
 RUN wget https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py38_cu113_pyt1121/pytorch3d-0.7.1-cp38-cp38-linux_x86_64.whl
+# RUN git submodule add https://github.com/ThibaultGROUEIX/ChamferDistancePytorch
 
 RUN PIP_INSTALL="python -m pip --no-cache-dir install --upgrade" && \
     $PIP_INSTALL \
@@ -205,7 +206,8 @@ RUN PIP_INSTALL="python -m pip --no-cache-dir install --upgrade" && \
         torch-sparse -f https://pytorch-geometric.com/whl/torch-1.12.1+cu113.html \
         torch-geometric \
         torch-cluster -f https://pytorch-geometric.com/whl/torch-1.12.1+cu113.html \
-        pytorch3d-0.7.1-cp38-cp38-linux_x86_64.whl
+        pytorch3d-0.7.1-cp38-cp38-linux_x86_64.whl \
+        torch-summary 
 
 
 # # RUN MESA_HOME="/mesa-18.3.3"
@@ -214,6 +216,12 @@ RUN PIP_INSTALL="python -m pip --no-cache-dir install --upgrade" && \
 # ENV C_INCLUDE_PATH="$C_INCLUDE_PATH:$/mesa-18.3.3/include/"
 # ENV CPLUS_INCLUDE_PATH="$CPLUS_INCLUDE_PATH:/mesa-18.3.3/include/"
 
+# RUN GIT_CLONE="git clone --recursive" && \
+#     $GIT_CLONE \
+#         https://github.com/ThibaultGROUEIX/ChamferDistancePytorch.git && \
+#     cd ChamferDistancePytorch/chamfer3D && \
+#     python3 setup.py  install && \
+#     cd ../..
 
 RUN GIT_CLONE="git clone --recursive" && \
     $GIT_CLONE \
@@ -230,6 +238,10 @@ RUN GIT_CLONE="git clone --recursive" && \
 # copy . /app copies content of ur supposed working dir to the docker wk dir
 WORKDIR /app
 COPY . /app
+
+# RUN bash point_ops/compile_chamfer.sh
+
+# if this works, try setup of pointnet2ops to reduce compilation time.
 
 RUN adduser -u 5678 --disabled-password --gecos "" appuser && chown -R appuser /app
 USER appuser

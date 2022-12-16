@@ -337,7 +337,7 @@ def normalize_als(in_dir, trsf_dir, out_dir, snt_dir, dataset_dir, fixed_cnt=204
 def main():
     dataset_dir = "/data"
     num_processes = 8
-    fix_sample_cnt = 4096
+    fix_sample_cnt = 2048
 
     # print("002 Try to repair meshes or filter broken ones. Ensure solid meshes for signed distance calculations")
     # # solid here means: watertight, consistent winding, outward facing normals

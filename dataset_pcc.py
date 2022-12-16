@@ -48,15 +48,14 @@ class CustomDataset(Dataset):
         # t.toc('mesh sampling took') #Time elapsed since t.tic()
 
         # use fps to reduce points to fixed number
-        surf_pnt_samples = torch.from_numpy(surf_instance.points).float()[None, :, :].to(device) # BN3
-        surf_pnt_normals = torch.from_numpy(surf_instance.normals).float()[None, :, :].to(device) # BN3
+        surf_pnt_samples = torch.from_numpy(surf_instance.points).float()[None, :, :].to(self.device) # BN3
+        surf_pnt_normals = torch.from_numpy(surf_instance.normals).float()[None, :, :].to(self.device) # BN3
         fps_idx = pointnet2_utils.furthest_point_sample(surf_pnt_samples, 16348) # xyz: torch.Tensor
         # t.toc('mesh/fps sampling took') #Time elapsed since t.tic()
 
         surf_pnt_samples = surf_pnt_samples.permute(0,2,1).contiguous()
         complete_pc = pointnet2_utils.gather_operation(surf_pnt_samples, fps_idx.int())
         complete_normals = pointnet2_utils.gather_operation(surf_pnt_normals.permute(0,2,1).contiguous(), fps_idx.int())
-        #TODO: get normals from surf_instances, expand dims, use fps_idx to get corresponding fps normals, concat wit pnts.
         t.toc('mesh/fps sampling + indexing took') #Time elapsed since t.tic()
         complete_pc = torch.cat((torch.squeeze(complete_pc), torch.squeeze(complete_normals)),0).permute(1,0) # add .copy() to this line and change variable name if previous line has more use down the line
 

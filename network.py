@@ -1,91 +1,243 @@
-from dataset_pcc import OurDataset
-from torch.utils import data
 from torch import nn
 import torch
+from point_ops.pointnet2_ops import pointnet2_utils
 # import torch.nn.functional as F
-from torch_geometric.nn import knn_graph
-from deltaconv.nn import DeltaConv
+
+def knn(x, k):
+    inner = -2*torch.matmul(x.transpose(2, 1), x)
+    xx = torch.sum(x**2, dim=1, keepdim=True)
+    pairwise_distance = -xx - inner - xx.transpose(2, 1)
+ 
+    idx = pairwise_distance.topk(k=k, dim=-1)[1]   # (batch_size, num_points, k)
+    return idx
+
+def get_graph_feature(x, kmax=30, ms_list=[10, 20], idx=None):
+    batch_size = x.size(0)
+    num_points = x.size(2)
+    x = x.view(batch_size, -1, num_points)
+    if idx is None:
+        idx_max = knn(x, k=kmax)   # (batch_size, num_points, k)
+
+    if ms_list is not None:
+        ms_list.append(kmax)
+        ms_feats = []
+        for k in range(len(ms_list)):
+            idx_base = torch.arange(0, batch_size, device=x.device).view(-1, 1, 1)*num_points
+            idx = idx_max[:, :, :ms_list[k]] + idx_base
+            idx = idx.view(-1)
+            _, num_dims, _ = x.size()
+            xx = x.transpose(2, 1).contiguous()   # (batch_size, num_points, num_dims)  -> (batch_size*num_points, num_dims) #   batch_size * num_points * k + range(0, batch_size*num_points)
+            feature = xx.view(batch_size*num_points, -1)[idx, :]
+            feature = feature.view(batch_size, num_points, ms_list[k], num_dims) 
+            xx = xx.view(batch_size, num_points, 1, num_dims).repeat(1, 1, ms_list[k], 1)
+            feature = torch.cat((feature-xx, xx), dim=3).permute(0, 3, 1, 2).contiguous()
+            ms_feats.append(feature)
+        feature = None
+    else:
+        idx_base = torch.arange(0, batch_size, device=x.device).view(-1, 1, 1)*num_points
+        idx = idx_max + idx_base
+        idx = idx.view(-1)
+        _, num_dims, _ = x.size()
+        x = x.transpose(2, 1).contiguous()   # (batch_size, num_points, num_dims)  -> (batch_size*num_points, num_dims) #   batch_size * num_points * k + range(0, batch_size*num_points)
+        feature = x.view(batch_size*num_points, -1)[idx, :]
+        feature = feature.view(batch_size, num_points, kmax, num_dims) 
+        x = x.view(batch_size, num_points, 1, num_dims).repeat(1, 1, kmax, 1)
+        feature = torch.cat((feature-x, x), dim=3).permute(0, 3, 1, 2).contiguous()
+        ms_feats = None
+    return feature, ms_feats      # (batch_size, 2*num_dims, num_points, k), list of (batch_size, 2*num_dims, num_points, k_list)
 
 
-class Net(nn.Module):
-    def __init__(self, in_channels, conv_channels, mlps, num_nbrs, grad_reg, grad_kernel_width, centralize_first=True):
-        """
-        conv_channels params: (List[int]) channel output for each convolution
-        num_nbrs params: (int) number of neighbors to use in estimating gradient
-        grad_reg params: (float) the regularization value (lambda) used in least squares fitting 
-        grad_kernel_width params: (float) the width of the gaussian kernel used to weight the least-squares problem 
-                                  to approximate the gradient.
-        centralize_first params: (bool) whether or not to centralize the input features
-        """
-        super().__init__()
-        self.k = num_nbrs
-        self.grad_reg = grad_reg
-        self.grad_kernel_width = grad_kernel_width
-        
-        conv_channels.insert(0, in_channels)
-        self.convs = nn.ModuleList()
-        for i in range(len(conv_channels) - 1):
-            last_layer = i == (len(conv_channels) - 2)
-            self.convs.append(DeltaConv(conv_channels[i], 
-                                        conv_channels[i+1], 
-                                        depth=mlps, 
-                                        centralized=(centralize_first and i == 0), # centralizes on the first layer
-                                        vector=not(last_layer) # vector is only false if i is the last layer
-                                        )
-                                )
+class ConvBlock(nn.Module):
+    def __init__(self, in_feat, out_feat, kmax=40, ms_list=None): # layer1:[20,30], layer2:[30], layer3:None (i.e. no convblk)
+        super(ConvBlock, self).__init__()
+        self.ms_list = ms_list
+        self.k = kmax
+
+        # self.bn1 = nn.BatchNorm2d(64)
+        # self.bn2 = nn.BatchNorm2d(64)
+        self.conv1 = nn.Sequential(nn.Conv2d(in_feat, out_feat, kernel_size=1, bias=False),
+                                   nn.BatchNorm2d(out_feat), nn.LeakyReLU(negative_slope=0.2))
+        self.conv2 = nn.Sequential(nn.Conv2d(out_feat, out_feat, kernel_size=1, bias=False),
+                                   nn.BatchNorm2d(out_feat), nn.LeakyReLU(negative_slope=0.2))
 
     def forward(self, x):
-        points = x[0]
-        als_ppoints = x[2]
-        pos = torch.cat([points,als_ppoints], axis=1)
+        x, ms_x = get_graph_feature(x, kmax=self.k, ms_list=self.ms_list)   # (batch_size, 3, num_points) -> (batch_size, 3*2, num_points, k)
+        if self.ms_list is not None:
+            x1_list = []
+            for j in range(len(ms_x)):
+                x = ms_x[j]
+                x = self.conv1(x)                       # (batch_size, 3*2, num_points, k) -> (batch_size, 64, num_points, k)
+                x = self.conv2(x)                       # (batch_size, 64, num_points, k) -> (batch_size, 64, num_points, k)
+                x1 = x.max(dim=-1, keepdim=False)[0]    # (batch_size, 64, num_points, k) -> (batch_size, 64, num_points)
+                x1_list.append(x1)
+            x1 = sum(x1_list)/len(x1_list)
+        else:
+            x = self.conv1(x)                       # (batch_size, 3*2, num_points, k) -> (batch_size, 64, num_points, k)
+            x = self.conv2(x)                       # (batch_size, 64, num_points, k) -> (batch_size, 64, num_points, k)
+            x1 = x.max(dim=-1, keepdim=False)[0]    # (batch_size, 64, num_points, k) -> (batch_size, 64, num_points)
+        return x1
 
-        """Operator construction"""
-        # Create a kNN graph, which is used to:
-        # 1) Perform maximum aggregation in the scalar stream.
-        # 2) Approximate the gradient and divergence oeprators
-        # TODO: try to incorporate attention-based aggregation instead of max or mean.
-        batch = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0])
-        edge_index = knn_graph(pos, self.k, batch=batch, loop=True, flow='target_to_source')
+class PCEncoder(nn.Module):
+    def __init__(self, kmax=20, code_dim=512):
+        """
+        ms_list: list of k nearest neighbor values for multi-scaling
+        kmax: if ms_list is None, k nearest neighbors. if ms_list is not None, the maximum k for multi-scaling
+        code_dim: channel dimension of global feature
+        """
+        super().__init__()
+        self.k = kmax
+        self.code_dim = code_dim
 
-        # Use the normals provided by the data or estimate a normal from the data.
-        #   It is advised to estimate normals as a pre-transform.
-        # TODO: add normal estimation to the dataset prep step so that we save time and "build_tangent_basis" directly
-        edge_index_normal = knn_graph(pos, 10, batch=None, loop=True, flow='target_to_source')
-        # When normal orientation is unknown, we opt for a locally consistent orientation.
-        normal, x_basis, y_basis = estimate_basis(pos, edge_index_normal, orientation=pos)
+        # layer 1  
+        self.layer1 = ConvBlock(in_feat=3*2, out_feat=64, kmax=30, ms_list=[10,20])
 
-                # Build the gradient and divergence operators.
-        # grad and div are two sparse matrices in the form of SparseTensor.
-        grad, div = build_grad_div(pos, normal, x_basis, y_basis, edge_index, batch=None, 
-                                   kernel_width=self.grad_kernel_width, regularizer=self.grad_regularizer)
-        
-        """Forward pass convolutions"""
-        # The scalar features are stored in x
-        # x = data.x if hasattr(data, 'x') and data.x is not None else pos
-        x = pos
-        # TODO: explore data.x from the original data to figure out what exactly is in data.x
-        # Vector features in v
-        v = grad @ x # for now x is replaced with pos as stipulated from 3 lines up 
-        
-        # Store each of the interim outputs in a list
-        out = []
-        for conv in self.convs:
-            x, v = conv(x, v, grad, div, edge_index)
-            out.append(x)
-        print('done !!')
-        # TODO: Add the mlp part from DeltaNet** in accordance with encoder output for pnt_completion
-        # TODO: This encoder later to be modified for edge and corner output
-        return out
+        # layer 2
+        self.layer2 = ConvBlock(in_feat=64*2, out_feat=128, kmax=30, ms_list=[20])
 
-        
-BuildingDataset = OurDataset(train=True, npoints=2048, test_split_cnt=40)
-tr_loader = data.DataLoader(BuildingDataset, batch_size=8, shuffle=True)
-model = Net(3, [64,128,256], 2, 16, 0.003, 1, True)
-# Determine the device to run the experiment on.
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-for i, data in enumerate(tr_loader):
-    data[0] = data[0].to(device)
-    data[2] = data[2].to(device)
-    output = model(data)
+        # layer 3 #TODO: consider testing 128*2 --> 128
+        self.layer3 = nn.Sequential(nn.Conv2d(128*2, 128, kernel_size=1, bias=False),
+                                    nn.BatchNorm2d(128), nn.LeakyReLU(negative_slope=0.2))
 
-    print('done !!')
+        # last
+        self.last = nn.Sequential(nn.Conv2d(320, self.code_dim, kernel_size=1, bias=False),
+                                  nn.BatchNorm2d(self.code_dim), nn.LeakyReLU(negative_slope=0.2))
+
+    def forward(self, x):
+        x0 = x.permute(0,2,1) # (B 3 N)
+
+        # layer 1
+        x1 = self.layer1(x0)
+
+        # layer 2
+        x2 = self.layer2(x1)
+        #TODO: maybe try a MLP + Residual here for x2
+
+        # layer 3
+        x3, _ = get_graph_feature(x2, kmax=self.k, ms_list=None)     # (B, 128, N) -> (B, 128*2, N, k)
+        x3 = self.layer3(x3)                                         # (B, 128*2, N, k) -> (B, 128, N, k)
+        x3 = x3.max(dim=-1, keepdim=False)[0]                        # (B, 128, N, k) -> (B, 128, N)
+
+        # last bit
+        x = torch.cat((x1, x2, x3), dim=1)                           # (B, 320, N) 64+128+128=320
+
+        x = self.last(x.unsqueeze(-1)).squeeze()                     # (B, concat_dim, N) -> (B, emb_dims, N)
+        x = x.max(dim=-1, keepdim=False)[0]                           # (B, emb_dims, N) -> (B, emb_dims)
+
+        return x0, x
+
+class TransformerBlock(nn.Module):
+    def __init__(self, c_in, c_out, num_heads, ff_dim):
+        super().__init__()
+        self.to_qk = nn.Conv1d(c_in, c_out*2, kernel_size=1, bias=False)
+        self.lnorm1 = nn.LayerNorm(c_out)
+        self.mha = nn.MultiheadAttention(c_out, num_heads)
+        self.dp_attn = nn.Dropout(0.1) # attn
+        self.lnorm2 = nn.LayerNorm(c_out)
+        self.ff = nn.Sequential(nn.Linear(c_out, ff_dim),
+                                nn.GELU(),
+                                nn.Dropout(0.1),
+                                nn.Linear(ff_dim, c_out))
+        self.dp_ff = nn.Dropout(0.1)
+
+    def forward(self, x):
+        Q, K = self.to_qk(x).chunk(2, dim=1) # bcoz convs take [B C N] and linears take [B N C]
+        B, C, _ = Q.shape
+        Q = self.lnorm1(Q.permute(2, 0, 1))  # 201 bcoz mha takes its qkv tensors as [N B C]
+        K = self.lnorm1(K.permute(2, 0, 1))
+
+        mha_out = self.mha(Q, K, K)[0]  # thus: mha takes qkv, but kv here is shared; output[0]: [N B C]. [1]: attn weights per head
+
+        # apply residual of Q to attn w/ dp; coz Q is just and mlp output of x; and dp boost generalization
+        Q = self.lnorm2(Q + self.dp_attn(mha_out))
+        mha_out = self.ff(Q)
+        mha_out = Q + self.dp_ff(mha_out)
+        return mha_out.permute(1, 2, 0)  # [B C N]
+
+class PCDecoder(nn.Module):
+    def __init__(self, code_dim, scale, rf_level=1):  # num_dense = 16384
+        """
+        code_dim: dimension of global feature from max operation [B, C, 1]
+        num_coarse: number of coarse complete points to generate
+        """
+        super().__init__()
+        self.code_dim = code_dim
+        self.num_coarse = 512 
+        self.scale = scale
+        self.rf_level = rf_level
+        self.mlp = nn.Sequential(
+            nn.Linear(self.code_dim, 256),
+            nn.ReLU(inplace=True),
+            nn.Linear(256, 512),
+            nn.ReLU(inplace=True),
+            nn.Linear(512, 3 * self.num_coarse)  # B 1 C*3
+        )
+        self.seed_mlp = nn.Sequential(nn.Conv1d(3, 64, kernel_size=1),
+                                      nn.GELU(),
+                                      nn.Conv1d(64, 128, kernel_size=1))
+        self.g_feat_mlp = nn.Sequential(nn.Conv1d(512, 256, kernel_size=1),
+                                      nn.GELU(),
+                                      nn.Conv1d(256, 128, kernel_size=1))
+        self.trsf1 = TransformerBlock(c_in=256, c_out=256, num_heads=4, ff_dim=256*2)
+        self.trsf2 = TransformerBlock(c_in=256, c_out=256, num_heads=4, ff_dim=256*2)
+        self.trsf3 = TransformerBlock(c_in=256, c_out=256*self.scale, num_heads=4, ff_dim=256*2)
+
+        self.conv1 = nn.Conv1d(256*self.scale, 256*self.scale, kernel_size=1)
+        self.last_mlp = nn.Sequential(nn.Conv1d(256+128, 128, kernel_size=1),
+                                      nn.Conv1d(128, 64, kernel_size=1),
+                                      nn.GELU(),
+                                      nn.Conv1d(64, 3, kernel_size=1))
+
+        if self.rf_level == 2:
+            # self.seed_mlp = nn.Sequential(nn.Conv1d(3, 64, kernel_size=1),
+            #                           nn.GELU(),
+            #                           nn.Conv1d(64, 128, kernel_size=1))
+            # self.g_feat_mlp = nn.Sequential(nn.Conv1d(512, 256, kernel_size=1),
+            #                             nn.GELU(),
+            #                             nn.Conv1d(256, 128, kernel_size=1))
+            # self.trsf1 = TransformerBlock(c_in=128, c_out=128, num_heads=4, ff_dim=128*2)
+            # self.trsf2 = TransformerBlock(c_in=128, c_out=256, num_heads=4, ff_dim=256*2)
+            # self.trsf3 = TransformerBlock(c_in=256, c_out=128*scale, num_heads=4, ff_dim=128*4)
+            pass
+
+
+    def forward(self, partial_pc, glob_feat):
+
+        coarse = self.mlp(glob_feat).reshape(-1, self.num_coarse, 3)                    # [B, num_coarse, 3] coarse point cloud
+        ctrl_x = torch.cat([partial_pc.permute(0, 2, 1), coarse], dim=1)  # [B, N+num_coarse, 3]
+        fps_idx = pointnet2_utils.furthest_point_sample(ctrl_x, 512) 
+        ctrl_x = ctrl_x.permute(0,2,1).contiguous()
+        seed = pointnet2_utils.gather_operation(ctrl_x, fps_idx.int())    # [B, 3, N]
+        del ctrl_x
+        torch.cuda.empty_cache()
+
+        #since we have to concat the shape code & seed along channel dim, need to make sure dims balance/match
+        seed = self.seed_mlp(seed)
+        glob_feat = self.g_feat_mlp(glob_feat.unsqueeze(-1))
+        seed_gf = torch.cat([seed, glob_feat.repeat(1, 1, seed.size(2))], dim=1)
+
+        seed_gf = self.trsf1(seed_gf)  # [B, c_out, N]
+        seed_gf = self.trsf2(seed_gf)  # [B, c_out, N]
+        seed_gf = self.trsf3(seed_gf)  # [B, c_out*scale, N]
+
+        B, N, _ = coarse.shape
+        seed_gf = self.conv1(seed_gf).reshape(B, -1, N*self.scale)  # [B, c_out, N*scale]
+
+        #bcoz seed_gf is potentially upped by self.scale, seed must also be upped to match bf concat & mlp
+        seed_gf = torch.cat([seed_gf, seed.repeat(1, 1, self.scale)], dim=1)
+        seed_gf = self.last_mlp(seed_gf)
+        return coarse, seed_gf
+
+class PCCNet(nn.Module):
+    def __init__(self, kmax=20, code_dim=512):
+        super().__init__()
+        self.k = kmax
+        self.code_dim = code_dim
+        self.enc = PCEncoder(kmax=self.k, code_dim=self.code_dim)
+        self.dec = PCDecoder(code_dim=code_dim, scale=4)
+
+    def forward(self, x):
+        p_input, glob_feat = self.enc(x)
+        coarse_out, fine_out = self.dec(p_input, glob_feat)
+
+        return coarse_out, fine_out
+
