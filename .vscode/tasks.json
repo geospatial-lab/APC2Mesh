@@ -24,7 +24,7 @@
           "volumes": [
             {"localPath":"/mnt/data/rec_data","containerPath":"/data"},
             // {"localPath":"${PWD}/data","containerPath":"/data"},
-            {"localPath":"/home/hope/reconstruction/results","containerPath":"/results"}
+            {"localPath":"/home/hope/reconstruction/results","containerPath":"/outputs"}
             ]
           },
         "python": {

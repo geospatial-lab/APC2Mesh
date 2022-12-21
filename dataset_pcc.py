@@ -56,7 +56,7 @@ class CustomDataset(Dataset):
         surf_pnt_samples = surf_pnt_samples.permute(0,2,1).contiguous()
         complete_pc = pointnet2_utils.gather_operation(surf_pnt_samples, fps_idx.int())
         complete_normals = pointnet2_utils.gather_operation(surf_pnt_normals.permute(0,2,1).contiguous(), fps_idx.int())
-        t.toc('mesh/fps sampling + indexing took') #Time elapsed since t.tic()
+        # t.toc('mesh/fps sampling + indexing took') #Time elapsed since t.tic()
         complete_pc = torch.cat((torch.squeeze(complete_pc), torch.squeeze(complete_normals)),0).permute(1,0) # add .copy() to this line and change variable name if previous line has more use down the line
 
         return torch.from_numpy(partial_pc), complete_pc

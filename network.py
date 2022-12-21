@@ -1,7 +1,8 @@
 from torch import nn
 import torch
 from point_ops.pointnet2_ops import pointnet2_utils
-# import torch.nn.functional as F
+from loss_pcc import chamfer_loss_sqrt, chamfer_loss
+import numpy as np
 
 def knn(x, k):
     inner = -2*torch.matmul(x.transpose(2, 1), x)
@@ -33,6 +34,7 @@ def get_graph_feature(x, kmax=30, ms_list=[10, 20], idx=None):
             feature = torch.cat((feature-xx, xx), dim=3).permute(0, 3, 1, 2).contiguous()
             ms_feats.append(feature)
         feature = None
+        ms_list.pop()
     else:
         idx_base = torch.arange(0, batch_size, device=x.device).view(-1, 1, 1)*num_points
         idx = idx_max + idx_base
@@ -239,5 +241,28 @@ class PCCNet(nn.Module):
         p_input, glob_feat = self.enc(x)
         coarse_out, fine_out = self.dec(p_input, glob_feat)
 
-        return coarse_out, fine_out
+        return coarse_out, fine_out.permute(0, 2, 1)
 
+def validate(model, loader, epoch, args, device, rand_save=False): 
+    print("Validating ...")
+    model.eval()
+    num_iters = len(loader)
+
+    with torch.no_grad():
+        cdt_coarse, cdp_coarse, cdt_fine, cdp_fine = 0.0, 0.0, 0.0, 0.0
+        for i, data in enumerate(loader):
+            #data
+            xyz = data[0][:, :, :3].to(device).float()  # partial: [B 2048, 6] include normals
+            #model
+            coarse, fine = model(xyz)
+            #losses
+            gt_xyz = data[1][:, :, :3].to(device).float().contiguous()  # partial: [B 16348, 6] include normals
+            cdp_fine += chamfer_loss_sqrt(fine, gt_xyz).item()  #inputs shd be BNC; cd_p
+            cdp_coarse += chamfer_loss_sqrt(coarse, gt_xyz).item()  
+            cdt_fine += chamfer_loss(fine, gt_xyz).item()  # cd_t
+            cdt_coarse += chamfer_loss(coarse, gt_xyz).item()  
+
+            if rand_save and args.max_epoch == epoch and i==0:
+                np.savez(str(args.file_dir) + '/rand_outs.npz', gt_pnts=gt_xyz.data.cpu().numpy(), fine_pnts=fine.data.cpu().numpy(), coarse_pnts=coarse.data.cpu().numpy())
+
+    return {'fine_p': cdp_fine/num_iters, 'coarse_p': cdp_coarse/num_iters, 'fine_t': cdt_fine/num_iters, 'coarse_t': cdt_coarse/num_iters}

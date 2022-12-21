@@ -207,7 +207,8 @@ RUN PIP_INSTALL="python -m pip --no-cache-dir install --upgrade" && \
         torch-geometric \
         torch-cluster -f https://pytorch-geometric.com/whl/torch-1.12.1+cu113.html \
         pytorch3d-0.7.1-cp38-cp38-linux_x86_64.whl \
-        torch-summary 
+        torch-summary \
+        pytorch_warmup
 
 
 # # RUN MESA_HOME="/mesa-18.3.3"
