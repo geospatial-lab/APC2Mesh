@@ -21,9 +21,10 @@ class Args(object):
 
     # HParams - net
     gpu = 0
-    lr = 0.0001
+    lr = 0.0006
+    eta_min = 0.0000001
     wd = 0.01  # weight decay (AdamW default)
-    max_epoch = 80
+    max_epoch = 150
     bs = 8  # batch_size
     npoints = 2048
 

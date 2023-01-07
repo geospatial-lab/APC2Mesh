@@ -32,7 +32,7 @@ class CustomDataset(Dataset):
     def __getitem__(self, index):
         partial_file = self.partial_list[index]
         mesh_file = self.mesh_list[index]
-        partial_pc = np.load(os.path.join(self.partial_path, partial_file))['unit_als'][:,:3]  # has normals
+        partial_pc = np.load(os.path.join(self.partial_path, partial_file))['unit_als'][:,:]  # has normals
         mesh = trimesh.load(os.path.join(self.mesh_path, mesh_file))
         
         t.tic() #Start timer
