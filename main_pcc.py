@@ -5,7 +5,7 @@ from network import PCCNet, validate
 from point_ops.pointnet2_ops import pointnet2_utils as p2u
 from torch.utils.tensorboard import SummaryWriter
 import pytorch_warmup as warmup
-from loss_pcc import chamfer_loss_sqrt, l2_normal_loss, nbrhood_uniformity_loss
+from loss_pcc import chamfer_loss_sqrt, l2_normal_loss, p2p_dist
 from config_pcc import Args as args
 from config_pcc import start_logger
 from pytictoc import TicToc
@@ -36,8 +36,8 @@ warmup_scheduler = warmup.UntunedLinearWarmup(optimizer)
 # loss init
 t = TicToc() #create instance of class
 llr_logger = start_logger(log_dir=args.log_dir, fname='lr_loss')
-llr_logger.info('ms:[10,20,30] | 256-trsf | 4heads | scale: [x4 +] | bs: 8 | #ep: 150 |lr: 0.0006 | eta_min: 1e-07 | normals: Yes | #tr/ts: 2000/40')
-tb = SummaryWriter(comment=f'ms:[10,20,30] | 256-trsf | 4heads | scale: [x4, +]')
+llr_logger.info('ms:[10,20,30] | 256-trsf | 4heads | scale: [x4, +ppconv] | bs: 8 | #ep: 140 |lr: 0.0006 | eta_min: 1e-07 | normals: Yes | #tr/ts: 2000/40')
+tb = SummaryWriter(comment=f'ms:[10,20,30] | 256-trsf | 4heads | scale: [x4, +ppconv]')
 
 init_epoch = 1  # for now. #TODO: adapt it to pick it from pretrain output filename later
 best_val_cdp = 2.0
@@ -77,9 +77,11 @@ for epoch in range(init_epoch, args.max_epoch+1):
         fine_list.append(loss_fine)
 
         # Loss (normals)
-        
         # nbr_pnt_loss, nbr_norm_loss = nbrhood_uniformity_loss(fine, 10, 10)
         loss = loss + 0.1*normal_loss # + nbr_pnt_loss + nbr_norm_loss
+
+        if args.p2p and (epoch % args.p2p_interval) == 0:
+            loss += p2p_dist(gt_fine, fine) * 0.1
 
         total_list.append(loss)
 
@@ -127,10 +129,10 @@ print('done ...')
 
 #TODO: ideas
 '''
-(*) point2plane (3 point to compute plane... kinda like a face of a mesh with normal)
+(*) point2plane in terms of loss (3 point to compute plane... kinda like a face of a mesh with normal)
 (*) increase training data
-(*) the possibility of attention on points with the weights assigning weaker weights to 
-     points on a diff. plane done the query point. (kinda adjustment of DenseNet in PointConv to fit my use case)
+(*) attention on points where weights r assigned according to normal cosine similarity. weak weights 
+    to points on a diff. plane than the query point. (DONE, 2023-01-15_05-26... needs some tweaking for better losses)
 (*) introduce pointconv
 (*) introduce one more trsf_layer after refine_1 [2023-01-05_18-07] (DONE, has potential, but will require a lot more training epochs)
 (*) (10,20,30) (20,30) (20) --> (10,20,30) (10,20) (20) [2023-01-05_12-47] (DONE, 

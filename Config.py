@@ -8,20 +8,21 @@ class Args(object):
 
     # HParams - files
     fix_sample_cnt = 4096  # for now [2048, 4096] from sdf_try.py
-    data_path = '/data/processed/%d' %(fix_sample_cnt)
+    data_path = '/data/pcc_out'
+    # data_path = '/data/processed/%d' %(fix_sample_cnt)
     complete_path = os.path.join(data_path, '04_query_npz')
     partial_path = os.path.join(data_path, '05_als_npz')
     save_path = "/data/processed/%s/net_outputs/checkpoints" %(fix_sample_cnt)
 
     # HParams - Rec
     torch_seed = 5
-    samples = 15000  # number of points to sample reconstruction with ???
+    samples = 5000  # number of points to sample reconstruction with ???
     initial_mesh = None  # if available, replace this with path
-    initial_num_faces = 8000
-    init_samples = 10000
+    initial_num_faces = 3000
+    init_samples = 4000
     iterations = 1000
     upsamp = 1000  # upsample each {upsamp}th iteration
-    max_faces = 10000  # maximum number of faces to upsample to
+    max_faces = 8000  # maximum number of faces to upsample to
     faces_to_part = [8000, 16000, 20000]  # after how many faces to split
 
     # HParams - net

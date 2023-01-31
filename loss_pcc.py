@@ -83,3 +83,54 @@ def nbrhood_uniformity_loss(xyz, k_point, k_normal):
     # cosine_normal_loss = torch.mean(torch.abs(torch.sum(dot_product, dim=-1)))
 
     return point_neighbor_loss, normal_neighbor_loss  #cosine_normal_loss
+
+
+def computeCandidateNormals(gt, predicted, k=20):
+    pred = predicted.detach().clone()
+    B, N, C = gt.shape
+    _, S, _ = pred.shape
+
+    # get indices of gt which has a minimum distance from pred
+    knn = knn_points(pred[:, :, :3], gt[:, :, :3], K=k) # input shd be B N/S C; dist, k_idx: BSK
+    query_gt_grps = knn_gather(gt, knn.idx)[:,:,:,3:]  # BSKC 
+        
+    query_grp_cnters = query_gt_grps[:, :, 0, :]  # i.e., the smallest dist to the pred query
+
+    # cosine similarity
+    dot = torch.matmul(query_gt_grps, query_grp_cnters.view(B, S, 1, 3).permute(0,1,3,2)).squeeze()  #BSK
+    cos_sim = dot / (torch.linalg.norm(query_gt_grps, dim=-1) * torch.linalg.norm(query_grp_cnters, dim=-1).unsqueeze(-1)) #BSK/(BSK * BS1)
+
+    # cos_sim = torch.where(cos_sim < 0.75, cos_sim*0.0, cos_sim)  #BSK, C is one so squeezed
+    trunc_idx = torch.where(cos_sim < 0.75)
+    query_gt_grps[trunc_idx[0], trunc_idx[1], trunc_idx[2], :] = float('nan') # : or 3: 'Nan' bcoz normals parallel to the z-axiz will hv a 0.0 z-value
+    query_grp_normal = torch.nanmean(query_gt_grps, axis=2) #BN3 non-zero mean
+
+    return query_grp_normal, query_grp_cnters
+
+
+def computePlaneWithNormalAndPoint(grp_nmls, query_pnts):
+    '''a, b, c are normals which corresponds to the last 3 columns of cloud'''
+
+    a = grp_nmls[:,:,0]  #BN
+    b = grp_nmls[:,:,1]
+    c = grp_nmls[:,:,2]
+    d = torch.diagonal(torch.matmul(query_pnts, grp_nmls.permute(0, 2, 1)), offset=0, dim1=1, dim2=2) * -1.0  # Multiplication by -1 preserves the sign (+) of D on the LHS
+    # d = np.diag(np.dot(test_nbr[:,:3], test_nbr[:,3:].T)) * -1.0  # Multiplication by -1 preserves the sign (+) of D on the LHS
+    normalizationFactor = torch.sqrt((a * a) + (b * b) + (c * c))
+
+    # if normalizationFactor == 0:
+    #     return None
+    a /= normalizationFactor
+    b /= normalizationFactor
+    c /= normalizationFactor
+    d /= normalizationFactor
+
+    return (a, b, c, d)
+
+
+def p2p_dist(gt, pred):
+    grp_normals, query_pnts = computeCandidateNormals(gt, pred)
+    pl_coeffs = computePlaneWithNormalAndPoint(grp_normals, query_pnts)
+    dist = torch.abs(pl_coeffs[0]*pred[:,:,0] + pl_coeffs[1]*pred[:,:,1] + pl_coeffs[2]*pred[:,:,2] + pl_coeffs[3])
+    nml_len = torch.sqrt((pl_coeffs[0] * pl_coeffs[0]) + (pl_coeffs[1] * pl_coeffs[1]) + (pl_coeffs[2] * pl_coeffs[2]))
+    return torch.mean(dist/nml_len)

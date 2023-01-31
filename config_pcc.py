@@ -17,6 +17,8 @@ class Args(object):
     record_step = 2  # print/log the model info/metrics every ...
     # save_interval = 10  # save every ...
     val_interval = 2  # run the validation model every ...
+    p2p_interval = 10
+    p2p = True
 
 
     # HParams - net
@@ -24,7 +26,7 @@ class Args(object):
     lr = 0.0006
     eta_min = 0.0000001
     wd = 0.01  # weight decay (AdamW default)
-    max_epoch = 150
+    max_epoch = 140
     bs = 8  # batch_size
     npoints = 2048
 

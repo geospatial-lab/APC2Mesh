@@ -14,9 +14,9 @@ torch.manual_seed(args.torch_seed)
 device = torch.device('cuda:{}'.format(args.gpu) if torch.cuda.is_available() else torch.device('cpu'))
 print('device: {}'.format(device))
 
-pc_filename = os.listdir(args.partial_path)[0]  #TODO: turn this into a list for a loop over net later.
+pc_filename = os.listdir(args.data_path)[0]  #TODO: turn this into a list for a loop over net later.
 pc_fname_no_ext = pc_filename.split('.')[0]
-initial_data = np.load(os.path.join(args.partial_path, pc_filename))['unit_als']  #TODO:calculate normals for xyz in sdf_try.py
+initial_data = np.loadtxt(os.path.join(args.data_path, pc_filename))  #TODO:save normals for pcc_out files in main_pcc.py
 input_normals = initial_data[:, 3:]
 initial_xyz = initial_data[:, :3]
 del initial_data

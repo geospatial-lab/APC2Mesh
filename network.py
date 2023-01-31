@@ -3,6 +3,9 @@ import torch
 from point_ops.pointnet2_ops import pointnet2_utils
 from loss_pcc import chamfer_loss_sqrt, chamfer_loss
 import numpy as np
+from torch.nn import functional as F
+from pytorch3d.ops.knn import knn_gather, knn_points
+
 
 def knn(x, k):
     inner = -2*torch.matmul(x.transpose(2, 1), x)
@@ -11,6 +14,7 @@ def knn(x, k):
  
     idx = pairwise_distance.topk(k=k, dim=-1)[1]   # (batch_size, num_points, k)
     return idx
+
 
 def get_graph_feature(x, kmax=30, ms_list=[10, 20], idx=None):
     batch_size = x.size(0)
@@ -77,6 +81,7 @@ class ConvBlock(nn.Module):
             x1 = x.max(dim=-1, keepdim=False)[0]    # (batch_size, 64, num_points, k) -> (batch_size, 64, num_points)
         return x1
 
+
 class PCEncoder(nn.Module):
     def __init__(self, kmax=20, code_dim=512):
         """
@@ -92,7 +97,7 @@ class PCEncoder(nn.Module):
         self.layer1 = ConvBlock(in_feat=6*2, out_feat=64, kmax=30, ms_list=[10,20])
 
         # layer 2
-        self.layer2 = ConvBlock(in_feat=64*2, out_feat=128, kmax=20, ms_list=[10])
+        self.layer2 = ConvBlock(in_feat=64*2, out_feat=128, kmax=30, ms_list=[20])
 
         # layer 3 
         self.layer3 = nn.Sequential(nn.Conv2d(128*2, 128, kernel_size=1, bias=False),
@@ -126,6 +131,7 @@ class PCEncoder(nn.Module):
 
         return x0, x
 
+
 class TransformerBlock(nn.Module):
     def __init__(self, c_in, c_out, num_heads, ff_dim):
         super().__init__()
@@ -154,6 +160,132 @@ class TransformerBlock(nn.Module):
         mha_out = Q + self.dp_ff(mha_out)
         return mha_out.permute(1, 2, 0)  # [B C N]
 
+
+def cosine_similarity(x, k):
+    """
+        Parameters
+        ----------
+        x: input cloud [B N 6]
+        
+        Returns
+        ----------
+        cosine similarity of query points to their k-neighborhood points [B N K]
+        NB: [-1 to 1] weight space shifted to [0 to 1] in CSBlk
+    """
+    x = x.permute(0, 2, 1)
+    B, N, C = x.shape
+    # get indices of cloud1 which has a minimum distance from cloud2
+    knn = knn_points(x[:, :, :3], x[:, :, :3], K=k)  # input shd be BNC; dist, k_idx: BNK
+    # dist = knn.dists
+
+    grouped_x = knn_gather(x, knn.idx)  
+
+    dot = torch.matmul(grouped_x[:,:,:,3:], x[:,:,3:].view(B, N, 1, 3).permute(0,1,3,2)).squeeze()  #BNK
+    cos_sim = dot / (torch.linalg.norm(grouped_x[:,:,:,3:], dim=-1) * torch.linalg.norm(x[:,:,3:], dim=-1).unsqueeze(-1)) #BNK/(BNK * BN1)
+
+    delta_xyz = grouped_x[:,:,:,:3] - x[:,:,:3].view(B, N, 1, 3)
+    return cos_sim, torch.cat([grouped_x[:,:,:,:3], delta_xyz], dim=-1)
+
+
+class CSBlock(nn.Module):
+    '''cosine similarity block'''
+    def __init__(self, c_in, feat_dims):
+        super(CSBlock, self).__init__()
+
+        self.mlp_convs = nn.ModuleList()
+        self.mlp_bns = nn.ModuleList()
+
+        last_channel = c_in  
+        for c_out in feat_dims:  # [32, 32, 64]
+            self.mlp_convs.append(nn.Conv2d(last_channel, c_out, 1))
+            self.mlp_bns.append(nn.BatchNorm2d(c_out))
+            last_channel = c_out
+
+    def forward(self, cos_sim):
+        # cos_sim: shd b [BCKN], so permute(0, 2, 1).unsqueeze(1) coz cos_sim is [BNK]
+        cos_sim = cos_sim.permute(0, 2, 1).unsqueeze(1)
+        B, C, K, N = cos_sim.shape
+        for i, conv in enumerate(self.mlp_convs):
+            bn = self.mlp_bns[i]
+            cos_sim = bn(conv(cos_sim))  
+            if i == len(self.mlp_convs)-1: # this takes care of the -ve cos_sim vals (chk)
+                cos_sim = torch.sigmoid(cos_sim)
+            else:
+                cos_sim = F.gelu(cos_sim)
+
+        return cos_sim
+
+
+class SharedMLPBlock(nn.Module):
+    def __init__(self, c_in, feat_dims):
+        super(SharedMLPBlock, self).__init__()
+
+        self.mlp_convs = nn.ModuleList()
+        self.mlp_bns = nn.ModuleList()
+
+        last_channel = c_in  
+        for c_out in feat_dims:  # [32, 32, 64]
+            self.mlp_convs.append(nn.Conv2d(last_channel, c_out, 1))
+            self.mlp_bns.append(nn.BatchNorm2d(c_out))
+            last_channel = c_out
+
+    def forward(self, grouped_xyz):
+        # grouped_xyz: shd b [BCKN]
+        B, C, K, N = grouped_xyz
+        for i, conv in enumerate(self.mlp_convs):
+            bn = self.mlp_bns[i]
+            grouped_xyz = F.gelu(bn(conv(grouped_xyz))) 
+
+        return grouped_xyz
+        
+
+class PPConv(nn.Module):
+    '''Point-Plane refinement module'''
+    def __init__(self, c_in, feat_dims, k):
+        super(PPConv, self).__init__()
+
+        self.k = k
+        self.mlp_convs = nn.ModuleList()
+        self.mlp_bns = nn.ModuleList()
+
+        last_channel = c_in  
+        for c_out in feat_dims:  # [32, 64, 64]
+            self.mlp_convs.append(nn.Conv2d(last_channel, c_out, 1))
+            self.mlp_bns.append(nn.BatchNorm2d(c_out))
+            last_channel = c_out
+
+        # self.smlp = SharedMLPBlock(c_in=3, feat_dims=[32, 64, 64])
+        self.csblk = CSBlock(c_in=1, feat_dims=[32,64])
+        self.mlp = nn.Sequential(
+            nn.Conv1d(feat_dims[2], feat_dims[0], kernel_size=1),
+            nn.Conv1d(feat_dims[0], feat_dims[0], kernel_size=1),
+            nn.GELU(),
+            nn.Conv1d(feat_dims[0], 3, kernel_size=1)  
+        )
+
+    def forward(self, fine_out):
+        """fine_out: shd hv channel of 6, 3 coords 3 normals"""
+
+        grouped_cs, grouped_deltas = cosine_similarity(fine_out, k=self.k)  # takes in both xyz & normals; out [BNK, BNKC] 
+        grouped_deltas = grouped_deltas.permute(0,3,2,1)# for conv, grouped_xyz has to be BCKN 
+
+        for i, conv in enumerate(self.mlp_convs):
+            bn = self.mlp_bns[i]
+            grouped_deltas = F.gelu(bn(conv(grouped_deltas))) 
+
+        #TODO: (1) no max-scaling, (2) max-scaling w/ sigmoid (3) max-scaling w/ softmax
+        max_cs = grouped_cs.max(dim = 2, keepdim=True)[0]
+        cs_weight = grouped_cs / max_cs
+        cs_weight = self.csblk(cs_weight)  # [BCKN]
+
+        grouped_deltas = torch.sum(grouped_deltas * cs_weight, dim=2)   # TODO: matmul or mul
+    
+        #TODO:the sharedmlp blk can be applied on self.conv1 (from network.py) & results torch.mul with grp deltas
+        grouped_deltas = self.mlp(grouped_deltas)
+        
+        return torch.cat([grouped_deltas, fine_out[:, 3:, :]], dim=1)
+
+
 class PCDecoder(nn.Module):
     def __init__(self, code_dim, scale, rf_level=1):  # num_dense = 16384
         """
@@ -167,9 +299,9 @@ class PCDecoder(nn.Module):
         self.rf_level = rf_level
         self.mlp = nn.Sequential(
             nn.Linear(self.code_dim, 512),
-            nn.ReLU(inplace=True),
+            nn.GELU(),
             nn.Linear(512, self.code_dim),
-            nn.ReLU(inplace=True),
+            nn.GELU(),
             nn.Linear(self.code_dim, 6 * self.num_coarse)  # B 1 C*6
         )
         self.seed_mlp = nn.Sequential(nn.Conv1d(6, 64, kernel_size=1),
@@ -182,15 +314,17 @@ class PCDecoder(nn.Module):
         self.trsf2 = TransformerBlock(c_in=256, c_out=256, num_heads=4, ff_dim=256*2)
         self.trsf3 = TransformerBlock(c_in=256, c_out=256*self.scale, num_heads=4, ff_dim=256*2) # this ff_dim shd b x4 0r x8
 
-        # if rf_level == 2, comment this trsf blk
-        self.trsf4 = TransformerBlock(c_in=256*self.scale, c_out=128*self.scale, num_heads=4, ff_dim=128*4)
-        self.conv1 = nn.Conv1d(128*self.scale, 128*self.scale, kernel_size=1)
+        """ if rf_level == 2, comment this trsf blk """
+        # self.trsf4 = TransformerBlock(c_in=256*self.scale, c_out=128*self.scale, num_heads=4, ff_dim=128*4)
+        # self.conv1 = nn.Conv1d(128*self.scale, 128*self.scale, kernel_size=1)
 
-        # self.conv1 = nn.Conv1d(256*self.scale, 256*self.scale, kernel_size=1)
-        self.last_mlp = nn.Sequential(nn.Conv1d(256, 128, kernel_size=1),  # +128
+        self.conv1 = nn.Conv1d(256*self.scale, 256*self.scale, kernel_size=1)
+        self.last_mlp = nn.Sequential(nn.Conv1d(256+128, 128, kernel_size=1),  # +128
                                       nn.Conv1d(128, 64, kernel_size=1),
                                       nn.GELU(),
                                       nn.Conv1d(64, 6, kernel_size=1))
+
+        self.ppconv = PPConv(c_in=6, feat_dims=[32, 64, 64], k=10)
 
         if self.rf_level == 2:
             scale2 = 2
@@ -209,7 +343,6 @@ class PCDecoder(nn.Module):
                                          nn.Conv1d(128, 64, kernel_size=1),
                                          nn.GELU(),
                                          nn.Conv1d(64, 6, kernel_size=1))
-
 
     def forward(self, partial_pc, glob_feat):  # glob_feat shd be 1024, thus seed of 1024
 
@@ -231,7 +364,7 @@ class PCDecoder(nn.Module):
         seed_gf = self.trsf2(seed_gf)  # [B, c_out, N]
         seed_gf = self.trsf3(seed_gf)  # [B, c_out*scale, N]
 
-        seed_gf = self.trsf4(seed_gf)  # [B, c_out/2 * scale, N]
+        # seed_gf = self.trsf4(seed_gf)  # [B, c_out/2 * scale, N]
 
         B, N, _ = coarse.shape
         seed_gf = self.conv1(seed_gf).reshape(B, -1, N*self.scale)  # [B, c_out/2, N*scale]
@@ -239,6 +372,8 @@ class PCDecoder(nn.Module):
         #bcoz seed_gf is potentially upped by self.scale, seed must also be upped to match bf concat & mlp
         seed_gf = torch.cat([seed_gf, seed.repeat(1, 1, self.scale)], dim=1)
         seed_gf_m = self.last_mlp(seed_gf)
+
+        seed_gf_m = self.ppconv(seed_gf_m)
 
         if self.rf_level == 2: #we can think of hierrachical completion instead of one time completion like many approaches
             scale2 = 2
@@ -261,8 +396,8 @@ class PCDecoder(nn.Module):
             return coarse, seed_gf_m, seed_gf  
         else:
             seed_gf = None
-            #TODO: extra trsf layer
             return coarse, seed_gf_m, seed_gf
+
 
 class PCCNet(nn.Module):
     def __init__(self, kmax=20, code_dim=512):
@@ -279,6 +414,7 @@ class PCCNet(nn.Module):
             return coarse_out, fine_out.permute(0, 2, 1), finer_out.permute(0, 2, 1)
         else:
             return coarse_out, fine_out.permute(0, 2, 1), finer_out
+
 
 def validate(model, loader, epoch, args, device, rand_save=False): 
     print("Validating ...")
