@@ -229,7 +229,7 @@ def get_sdf(in_dir, out_dir, dataset_dir, fix_sample_cnt, num_processes=1):
     mp_utils.start_process_pool(_get_sdf, call_params, num_processes)
 
 
-def _normalize_als(file_in, file_out, trsf_file, snt_file, fix_sample_cnt):
+def _normalize_als(file_in, file_out, trsf_file):
     # Load back in
     als_pnts = point_cloud.load_xyz(file_in)
     trsf_params = np.load(trsf_file)  
@@ -241,6 +241,149 @@ def _normalize_als(file_in, file_out, trsf_file, snt_file, fix_sample_cnt):
     # scale to unit sphere
     normalized_data = np.divide(translatedData, scale)
 
+    np.savetxt(file_out, normalized_data)# Save to file i.e., XYZ
+
+def normalize_als(in_dir, trsf_dir, out_dir, dataset_dir, num_processes=1):
+
+    in_dir_abs = os.path.join(dataset_dir, in_dir)
+    out_dir_abs = os.path.join(dataset_dir, out_dir)
+    trsf_dir_abs = os.path.join(dataset_dir, trsf_dir)
+
+    os.makedirs(out_dir_abs, exist_ok=True)
+
+    call_params = []
+
+    xyz_files = [f for f in os.listdir(in_dir_abs)
+                 if os.path.isfile(os.path.join(in_dir_abs, f))]
+
+    trsf_files = [os.path.splitext(f)[0] for f in os.listdir(trsf_dir_abs)
+                 if os.path.isfile(os.path.join(trsf_dir_abs, f))]
+
+    for fi, f in enumerate(xyz_files):
+        if not f[:-4] in trsf_files: # if trsf doesn't, then snt should be fine too.
+            print('WARNING: {}.npz is missing from the .xyz files list'.format(f[:-4]))
+            continue 
+        in_file_abs = os.path.join(in_dir_abs, f)
+        out_file_abs = os.path.join(out_dir_abs, (f[:-4]+'.txt'))
+        trsf_file_abs = os.path.join(trsf_dir_abs, (f[:-4]+'.npz'))
+
+        if not file_utils.call_necessary(in_file_abs, out_file_abs):
+            continue
+
+        call_params += [(in_file_abs, out_file_abs, trsf_file_abs)]
+
+    mp_utils.start_process_pool(_normalize_als, call_params, num_processes)
+
+
+def _scale_mesh(file_in, file_out, scale): #, trans_file_out
+
+    mesh = trimesh.load(file_in)
+
+    # scale to desired size
+    scaled_data = mesh.vertices * scale
+
+    outmesh = trimesh.Trimesh(vertices=scaled_data, faces=mesh.faces)
+    aa = outmesh.vertices + (mesh.centroid - outmesh.centroid)
+    outmesh = trimesh.Trimesh(vertices=aa, faces=outmesh.faces)
+    outmesh.export(file_out)
+
+    #TODO: try _normalize with original data, n rather scale the scale
+
+
+def scale_meshes(in_dir, out_dir, scale, dataset_dir, num_processes=1):
+    """
+    Translate meshes to origin and scale to unit cube.
+    :param in_dir:
+    :param out_dir:
+    :param dataset_dir:
+    :param num_processes:
+    :return:
+    """
+
+    in_dir_abs = os.path.join(dataset_dir, in_dir)
+    out_dir_abs = os.path.join(dataset_dir, out_dir)
+
+    os.makedirs(out_dir_abs, exist_ok=True)
+
+    call_params = []
+
+    mesh_files = [f for f in os.listdir(in_dir_abs)
+                 if os.path.isfile(os.path.join(in_dir_abs, f))]
+    for fi, f in enumerate(mesh_files):
+        if f.endswith('.mtl'):
+            continue
+        in_file_abs = os.path.join(in_dir_abs, f)
+        out_file_abs = os.path.join(out_dir_abs, f)
+
+        if not file_utils.call_necessary(in_file_abs, out_file_abs):
+            continue
+
+        call_params += [(in_file_abs, out_file_abs, scale)]
+
+    mp_utils.start_process_pool(_scale_mesh, call_params, num_processes)
+
+
+def get_clean_als(in_dir, s_mesh_dir, b_mesh_dir, out_dir, out_viz_dir, dataset_dir):
+    in_dir_abs = os.path.join(dataset_dir, in_dir)
+    out_dir_abs = os.path.join(dataset_dir, out_dir)
+    smesh_dir_abs = os.path.join(dataset_dir, s_mesh_dir)
+    bmesh_dir_abs = os.path.join(dataset_dir, b_mesh_dir)
+    out_viz_dir_abs = os.path.join(dataset_dir, out_viz_dir)
+
+    os.makedirs(out_dir_abs, exist_ok=True)
+    os.makedirs(out_viz_dir_abs, exist_ok=True)
+
+    als_files = [f for f in os.listdir(in_dir_abs)
+                 if os.path.isfile(os.path.join(in_dir_abs, f))]
+
+    for fi, f in enumerate(als_files):
+        in_file_abs = os.path.join(in_dir_abs, f)
+        out_file_abs = os.path.join(out_dir_abs, f)
+        smesh_file_abs = os.path.join(smesh_dir_abs, (f[:-4]+'.obj'))
+        bmesh_file_abs = os.path.join(bmesh_dir_abs, (f[:-4]+'.obj'))
+        out_viz_file_abs = os.path.join(out_viz_dir_abs, f)
+
+        # load point and mesh data
+        als_pc = np.loadtxt(in_file_abs)
+        smesh = trimesh.load(smesh_file_abs)
+
+        '''surf_instance contains various data, e.g. points, kd_tree, etc.'''
+        surf_instance = get_surface_point_cloud(smesh, 
+                                                surface_point_method='sample', 
+                                                bounding_radius=1, 
+                                                scan_count=30, 
+                                                scan_resolution=200, 
+                                                sample_point_count=40000, 
+                                                calculate_normals=True)
+
+        als_sdf = surf_instance.get_sdf_in_batches(als_pc, use_depth_buffer=False, return_gradients=False)
+        colors = np.zeros(als_pc.shape)
+        colors[als_sdf < 0, 2] = 1
+        colors[als_sdf > 0, 0] = 1
+
+        bmesh = trimesh.load(bmesh_file_abs)
+        surf_instance = get_surface_point_cloud(bmesh, 
+                                                surface_point_method='sample', 
+                                                bounding_radius=1, 
+                                                scan_count=30, 
+                                                scan_resolution=200, 
+                                                sample_point_count=40000, 
+                                                calculate_normals=True)
+
+        als_sdf = surf_instance.get_sdf_in_batches(als_pc, use_depth_buffer=False, return_gradients=False)
+        # colors[als_sdf < 0, 2] = 1
+        colors[als_sdf > 0, 1] = 1
+
+        als_color = np.column_stack([als_pc, colors]) 
+        np.savetxt(out_viz_file_abs, als_color)
+
+        clean_pnts = als_pc[np.where((colors[:,0] == 1) & (colors[:,1] == 0) & (colors[:,2] == 0))] 
+        np.savetxt(out_file_abs, clean_pnts)
+
+
+def _fix_sampling(nals_file, nmesh_file, file_out, fix_sample_cnt):
+
+    normalized_data = np.loadtxt(nals_file) # load normalized (unit) als file 
     # subsample (down or up) ALS points to fixed count
     if len(normalized_data) > fix_sample_cnt:
         # use fps to reduce points to fixed number
@@ -278,7 +421,7 @@ def _normalize_als(file_in, file_out, trsf_file, snt_file, fix_sample_cnt):
                 k = k + 3
 
     # get sdf of unit als
-    mesh = trimesh.load(snt_file)
+    mesh = trimesh.load(nmesh_file)
 
     '''surf_instance contains various data, e.g. points, kd_tree, etc.'''
     surf_instance = get_surface_point_cloud(mesh, 
@@ -298,41 +441,32 @@ def _normalize_als(file_in, file_out, trsf_file, snt_file, fix_sample_cnt):
     # pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=10))
     normalized_data = np.column_stack([normalized_data, normals.numpy().squeeze()])
 
-    np.savez(file_out, unit_als=normalized_data, unit_als_sdf=als_sdf) # Save to file
+    np.savez(file_out, unit_als=normalized_data, unit_als_sdf=als_sdf)
 
-def normalize_als(in_dir, trsf_dir, out_dir, snt_dir, dataset_dir, fixed_cnt=2048, num_processes=1):
 
-    in_dir_abs = os.path.join(dataset_dir, in_dir)
+def fix_sampling(als_dir, nmesh_dir, out_dir, dataset_dir, fix_cnt, num_processes):
+    als_dir_abs = os.path.join(dataset_dir, als_dir)
     out_dir_abs = os.path.join(dataset_dir, out_dir)
-    trsf_dir_abs = os.path.join(dataset_dir, trsf_dir)
-    snt_dir_abs = os.path.join(dataset_dir, snt_dir)
+    nmesh_dir_abs = os.path.join(dataset_dir, nmesh_dir)
 
     os.makedirs(out_dir_abs, exist_ok=True)
 
     call_params = []
 
-    xyz_files = [f for f in os.listdir(in_dir_abs)
-                 if os.path.isfile(os.path.join(in_dir_abs, f))]
+    als_files = [f for f in os.listdir(als_dir_abs)
+                 if os.path.isfile(os.path.join(als_dir_abs, f))]
 
-    trsf_files = [os.path.splitext(f)[0] for f in os.listdir(trsf_dir_abs)
-                 if os.path.isfile(os.path.join(trsf_dir_abs, f))]
+    for fi, f in enumerate(als_files):
+        als_file_abs = os.path.join(als_dir_abs, f)
+        out_file_abs = os.path.join(out_dir_abs, f)
+        nmesh_file_abs = os.path.join(nmesh_dir_abs, (f[:-4]+'.obj'))
 
-    for fi, f in enumerate(xyz_files):
-        if not f[:-4] in trsf_files: # if trsf doesn't, then snt should be fine too.
-            print('WARNING: {}.npz is missing from the .xyz files list'.format(f[:-4]))
-            continue 
-        in_file_abs = os.path.join(in_dir_abs, f)
-        out_file_abs = os.path.join(out_dir_abs, (f[:-4]+'.npz'))
-        trsf_file_abs = os.path.join(trsf_dir_abs, (f[:-4]+'.npz'))
-        snt_file_abs = os.path.join(snt_dir_abs, (f[:-4]+'.obj'))
-
-        if not file_utils.call_necessary(in_file_abs, out_file_abs):
+        if not file_utils.call_necessary(als_file_abs, out_file_abs):
             continue
 
-        call_params += [(in_file_abs, out_file_abs, trsf_file_abs, snt_file_abs, fixed_cnt)]
+        call_params += [(als_file_abs, nmesh_file_abs, out_file_abs, fix_cnt)]
 
-    mp_utils.start_process_pool(_normalize_als, call_params, num_processes)
-
+    mp_utils.start_process_pool(_fix_sampling, call_params, num_processes)
 
 def main():
     dataset_dir = "/data"
@@ -344,20 +478,43 @@ def main():
     # clean_meshes(dataset_dir=dataset_dir, dir_in_meshes="image_1_mesh", 
     #              dir_out="02_cleaned_ply", num_processes=num_processes)
 
-    # print('003: scale and translate mesh, save transformation params.')
-    # normalize_meshes(in_dir='image_1_mesh', out_dir='processed/%s/03_snt_obj'%(fix_sample_cnt), 
-    #                  trans_dir='processed/%s/03_trsf_npz'%(fix_sample_cnt), dataset_dir=dataset_dir, 
-    #                  num_processes=num_processes)
+    print('003: scale and translate mesh, save transformation params.')
+    normalize_meshes(in_dir='image_1_mesh', out_dir='processed/%s/03_nnt_obj'%(fix_sample_cnt), 
+                     trans_dir='processed/%s/03_trsf_npz'%(fix_sample_cnt), dataset_dir=dataset_dir, 
+                     num_processes=num_processes)
 
-    # print('004a: generate complete query points set and their signed distances')
+    # print('004: generate complete query points set and their signed distances')
     # get_sdf(in_dir='processed/%s/03_snt_obj'%(fix_sample_cnt), 
     #         out_dir='processed/%s/04_query_npz'%(fix_sample_cnt), dataset_dir=dataset_dir, 
     #         fix_sample_cnt=fix_sample_cnt, num_processes=num_processes)
 
-    print('005b: adjust als points according to unit sphere mesh transformation params and compute sdf.')
+    print('005: adjust als points according to unit sphere mesh transformation params.')
     normalize_als(in_dir='image_1_xyz', trsf_dir='processed/%s/03_trsf_npz'%(fix_sample_cnt), 
-                  out_dir='processed/%s/05_als_npz'%(fix_sample_cnt), snt_dir='processed/%s/03_snt_obj'%(fix_sample_cnt),
-                  dataset_dir=dataset_dir, fixed_cnt=fix_sample_cnt, num_processes=1)
+                  out_dir='processed/%s/05_als_txt'%(fix_sample_cnt), dataset_dir=dataset_dir, 
+                  num_processes=num_processes)
+
+    print('006a: scale down unit mesh.')
+    scale_meshes(in_dir='processed/%s/03_nnt_obj'%(fix_sample_cnt), 
+                 out_dir='processed/%s/small03_nnt_obj'%(fix_sample_cnt), scale=0.95,
+                 dataset_dir=dataset_dir, num_processes=num_processes)
+
+    print('006b: scale up unit mesh.')
+    scale_meshes(in_dir='processed/%s/03_nnt_obj'%(fix_sample_cnt), 
+                 out_dir='processed/%s/big03_nnt_obj'%(fix_sample_cnt), scale=1.05,
+                 dataset_dir=dataset_dir, num_processes=num_processes)
+
+    print('007: get als points outside small03_snt meshes & save to clean_als')
+    get_clean_als(in_dir='processed/%s/05_als_txt'%(fix_sample_cnt), 
+                  s_mesh_dir='processed/%s/small03_nnt_obj'%(fix_sample_cnt), 
+                  b_mesh_dir='processed/%s/big03_nnt_obj'%(fix_sample_cnt),
+                  out_dir='processed/%s/clean_als_txt'%(fix_sample_cnt), 
+                  out_viz_dir='processed/%s/outlier_viz'%(fix_sample_cnt), dataset_dir=dataset_dir)
+    
+    print('008: up- or down-sample clean unit als to fixed count') 
+    fix_sampling(als_dir='processed/%s/clean_als_txt'%(fix_sample_cnt),
+                 nmesh_dir='processed/%s/03_nnt_obj'%(fix_sample_cnt), 
+                 out_dir='processed/%s/fixed_als_txt'%(fix_sample_cnt), 
+                 dataset_dir=dataset_dir, fix_cnt=fix_sample_cnt, num_processes=1)
 
     print('done...')
 

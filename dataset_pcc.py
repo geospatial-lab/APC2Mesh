@@ -15,8 +15,8 @@ class CustomDataset(Dataset):
         self.split = split
         self.device = device
         data_path = '/data/processed/%d' %(npoints)
-        self.mesh_path = os.path.join(data_path, '03_snt_obj')
-        self.partial_path = os.path.join(data_path, '05_als_npz')
+        self.mesh_path = os.path.join(data_path, '03_nnt_obj')
+        self.partial_path = os.path.join(data_path, 'fixed_als_txt')  # file naming error, contained files are actually .npz 
 
         """train/test split"""
         mesh_filelist = os.listdir(self.mesh_path)

@@ -11,7 +11,7 @@ from pathlib import Path
 import logging
 
 # Params - files
-chkpnt_path = '/outputs/experiments/2023-01-01_16-22/checkpoints/pccnet_140_0.01648_0.00076.pth'
+chkpnt_path = '/outputs/experiments/2023-03-02_06-12/checkpoints/pccnet_130_0.01617_0.00072.pth'
 
 experiment_dir = Path('/outputs/experiments/testing/')
 experiment_dir.mkdir(exist_ok=True)
@@ -91,17 +91,17 @@ def testing(model, loader, file_dir, device, rand_save=False):
             cdt_coarse += chamfer_loss(coarse[:, :, :3], gt_xyz).item()  
 
             if rand_save and i==0:
-                if finer is not None:
-                    np.savez(str(file_dir) + '/rand_outs.npz', gt_pnts=gt_xyz.data.cpu().numpy(), 
-                                                                    final_pnts=finer.data.cpu().numpy(), 
-                                                                    fine_pnts=fine.data.cpu().numpy(), 
-                                                                    coarse_pnts=coarse.data.cpu().numpy(),
-                                                                    als_pnts=xyz.data.cpu().numpy()[:, :, :3])
-                else:
-                    np.savez(str(file_dir) + '/rand_outs.npz', gt_pnts=gt_xyz.data.cpu().numpy(),
-                                                                    final_pnts=fine.data.cpu().numpy(), 
-                                                                    coarse_pnts=coarse.data.cpu().numpy(),
-                                                                    als_pnts=xyz.data.cpu().numpy()[:, :, :3])
+                # if finer is not None:
+                #     np.savez(str(file_dir) + '/rand_outs.npz', gt_pnts=gt_xyz.data.cpu().numpy(), 
+                #                                                     final_pnts=finer.data.cpu().numpy(), 
+                #                                                     fine_pnts=fine.data.cpu().numpy(), 
+                #                                                     coarse_pnts=coarse.data.cpu().numpy(),
+                #                                                     als_pnts=xyz.data.cpu().numpy()[:, :, :3])
+                # else:                                                 
+                np.savez(str(file_dir) + '/rand_outs_{}.npz'.format(i), gt_pnts=data[1].cpu().numpy(),
+                                                                        final_pnts=fine.data.cpu().numpy(), 
+                                                                        coarse_pnts=coarse.data.cpu().numpy(),
+                                                                        als_pnts=xyz.data.cpu().numpy()[:, :, :3])
 
     return {'finer_p': cdp_finer/num_iters, 'fine_p': cdp_fine/num_iters, 'coarse_p': cdp_coarse/num_iters, 'finer_t': cdt_finer/num_iters, 'fine_t': cdt_fine/num_iters, 'coarse_t': cdt_coarse/num_iters}
 

@@ -17,9 +17,11 @@ class Args(object):
     record_step = 2  # print/log the model info/metrics every ...
     # save_interval = 10  # save every ...
     val_interval = 2  # run the validation model every ...
-    p2p_interval = 10
-    p2p = True
-
+    # p2p_interval = 10
+    # p2p = True
+    tr_loss = 'cd' # cd, dcd, emd
+    # t_alpha = 200
+    # n_lambda = 0.5
 
     # HParams - net
     gpu = 0
@@ -29,6 +31,13 @@ class Args(object):
     max_epoch = 140
     bs = 8  # batch_size
     npoints = 2048
+
+    #HParams - chkpnting
+    load_chkpnt = False
+    chkpnt_path = '/outputs/experiments/2023-02-01_07-58/checkpoints/pccnet_128_0.01709_0.00082.pth'
+    fix_lr = 0.00007 
+    if load_chkpnt:
+        val_interval = 1
 
 def start_logger(log_dir, fname):
     logger = logging.getLogger()

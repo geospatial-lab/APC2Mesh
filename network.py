@@ -1,7 +1,7 @@
 from torch import nn
 import torch
 from point_ops.pointnet2_ops import pointnet2_utils
-from loss_pcc import chamfer_loss_sqrt, chamfer_loss
+from loss_pcc import chamfer_loss_sqrt, chamfer_loss, density_cd
 import numpy as np
 from torch.nn import functional as F
 from pytorch3d.ops.knn import knn_gather, knn_points
@@ -31,7 +31,7 @@ def get_graph_feature(x, kmax=30, ms_list=[10, 20], idx=None):
             idx = idx_max[:, :, :ms_list[k]] + idx_base
             idx = idx.view(-1)
             _, num_dims, _ = x.size()
-            xx = x.transpose(2, 1).contiguous()   # (batch_size, num_points, num_dims)  -> (batch_size*num_points, num_dims) #   batch_size * num_points * k + range(0, batch_size*num_points)
+            xx = x.transpose(2, 1).contiguous()   # (batch_size, num_points, num_dims)  -> (batch_size*num_points, num_dims) #batch_size * num_points * k + range(0, batch_size*num_points)
             feature = xx.view(batch_size*num_points, -1)[idx, :]
             feature = feature.view(batch_size, num_points, ms_list[k], num_dims) 
             xx = xx.view(batch_size, num_points, 1, num_dims).repeat(1, 1, ms_list[k], 1)
@@ -63,6 +63,9 @@ class ConvBlock(nn.Module):
                                    nn.BatchNorm2d(out_feat), nn.LeakyReLU(negative_slope=0.2))
         self.conv2 = nn.Sequential(nn.Conv2d(out_feat, out_feat, kernel_size=1, bias=False),
                                    nn.BatchNorm2d(out_feat), nn.LeakyReLU(negative_slope=0.2))
+        self.att_conv = nn.Sequential(nn.Conv2d(out_feat, 1, kernel_size=1, bias=True),
+                                      nn.BatchNorm2d(1), nn.LeakyReLU(negative_slope=0.2),
+                                      nn.Softmax(dim=-1))
 
     def forward(self, x):
         x, ms_x = get_graph_feature(x, kmax=self.k, ms_list=self.ms_list)   # (batch_size, 6, num_points) -> (batch_size, 6*2, num_points, k)
@@ -72,14 +75,20 @@ class ConvBlock(nn.Module):
                 x = ms_x[j]
                 x = self.conv1(x)                       # (batch_size, 3*2, num_points, k) -> (batch_size, 64, num_points, k)
                 x = self.conv2(x)                       # (batch_size, 64, num_points, k) -> (batch_size, 64, num_points, k)
-                x1 = x.max(dim=-1, keepdim=False)[0]    # (batch_size, 64, num_points, k) -> (batch_size, 64, num_points)
-                x1_list.append(x1)
+                # x1 = x.max(dim=-1, keepdim=False)[0]    # (batch_size, 64, num_points, k) -> (batch_size, 64, num_points)
+                # x1_list.append(x1)
+                attn_scores = self.att_conv(x)          # (bs, 64, num_points, k) -> (batch_size, 1, num_points, k)
+                x1 = torch.matmul(attn_scores.permute(0,2,1,3), x.permute(0,2,3,1))  # (batch_size, num_points, 1, 64)
+                x1_list.append(x1.squeeze().permute(0,2,1))  # (batch_size, 64, num_points)
             x1 = sum(x1_list)/len(x1_list)
         else:
             x = self.conv1(x)                       # (batch_size, 3*2, num_points, k) -> (batch_size, 64, num_points, k)
             x = self.conv2(x)                       # (batch_size, 64, num_points, k) -> (batch_size, 64, num_points, k)
-            x1 = x.max(dim=-1, keepdim=False)[0]    # (batch_size, 64, num_points, k) -> (batch_size, 64, num_points)
-        return x1
+            # x1 = x.max(dim=-1, keepdim=False)[0]    # (batch_size, 64, num_points, k) -> (bs, 64, num_points)
+            # x1_list.append(x1)
+            attn_scores = self.att_conv(x)          # (bs, 64, num_points, k) -> (batch_size, 1, num_points, k)
+            x1 = torch.matmul(attn_scores.permute(0,2,1,3), x.permute(0,2,3,1)).squeeze().permute(0,2,1)  # (batch_size, 64, num_points)
+        return x1          
 
 
 class PCEncoder(nn.Module):
@@ -101,7 +110,12 @@ class PCEncoder(nn.Module):
 
         # layer 3 
         self.layer3 = nn.Sequential(nn.Conv2d(128*2, 128, kernel_size=1, bias=False),
+                                    nn.BatchNorm2d(128), nn.LeakyReLU(negative_slope=0.2),
+                                    nn.Conv2d(128, 128, kernel_size=1, bias=False),
                                     nn.BatchNorm2d(128), nn.LeakyReLU(negative_slope=0.2))
+        self.att_conv3 = nn.Sequential(nn.Conv2d(128, 1, kernel_size=1, bias=True),
+                                            nn.BatchNorm2d(1), nn.LeakyReLU(negative_slope=0.2),
+                                            nn.Softmax(dim=-1))
 
         # last
         self.last = nn.Sequential(nn.Conv2d(320, self.code_dim, kernel_size=1, bias=False),
@@ -120,7 +134,10 @@ class PCEncoder(nn.Module):
         # layer 3
         x3, _ = get_graph_feature(x2, kmax=self.k, ms_list=None)     # (B, 128, N) -> (B, 128*2, N, k)
         x3 = self.layer3(x3)                                         # (B, 128*2, N, k) -> (B, 128, N, k)
-        x3 = x3.max(dim=-1, keepdim=False)[0]                        # (B, 128, N, k) -> (B, 128, N)
+        x3 = x3.max(dim=-1, keepdim=False)[0]                      # (B, 128, N, k) -> (B, 128, N)
+        # attn_scores = self.att_conv3(x3)                             # (B, 128, N, k) -> (B, 1, N, k)
+        # x3 = torch.matmul(attn_scores.permute(0,2,1,3), x3.permute(0,2,3,1)).squeeze().permute(0,2,1)  # (batch_size, 128, num_points)
+
 
         # last bit
         x = torch.cat((x1, x2, x3), dim=1)                           # (B, 320, N) 64+128+128=320
@@ -324,7 +341,7 @@ class PCDecoder(nn.Module):
                                       nn.GELU(),
                                       nn.Conv1d(64, 6, kernel_size=1))
 
-        self.ppconv = PPConv(c_in=6, feat_dims=[32, 64, 64], k=10)
+        # self.ppconv = PPConv(c_in=6, feat_dims=[32, 64, 64], k=10)
 
         if self.rf_level == 2:
             scale2 = 2
@@ -345,9 +362,10 @@ class PCDecoder(nn.Module):
                                          nn.Conv1d(64, 6, kernel_size=1))
 
     def forward(self, partial_pc, glob_feat):  # glob_feat shd be 1024, thus seed of 1024
-
+        partial_pc = partial_pc.permute(0, 2, 1)
         coarse = self.mlp(glob_feat).reshape(-1, self.num_coarse, 6)      # [B, num_coarse, 6] coarse point cloud
-        ctrl_x = torch.cat([partial_pc.permute(0, 2, 1), coarse], dim=1)  # [B, N+num_coarse, 6]
+
+        ctrl_x = torch.cat([partial_pc, coarse], dim=1)  # [B, N+num_coarse, 6]
         fps_idx = pointnet2_utils.furthest_point_sample(ctrl_x[:, :, :3].contiguous(), 1024) 
         ctrl_x = ctrl_x.permute(0,2,1).contiguous()
         seed = pointnet2_utils.gather_operation(ctrl_x, fps_idx.int())    # [B, 6, N]
@@ -373,7 +391,7 @@ class PCDecoder(nn.Module):
         seed_gf = torch.cat([seed_gf, seed.repeat(1, 1, self.scale)], dim=1)
         seed_gf_m = self.last_mlp(seed_gf)
 
-        seed_gf_m = self.ppconv(seed_gf_m)
+        # seed_gf_m = self.ppconv(seed_gf_m)
 
         if self.rf_level == 2: #we can think of hierrachical completion instead of one time completion like many approaches
             scale2 = 2
@@ -422,37 +440,35 @@ def validate(model, loader, epoch, args, device, rand_save=False):
     num_iters = len(loader)
 
     with torch.no_grad():
-        cdt_coarse, cdp_coarse, cdt_fine, cdp_fine, cdt_finer, cdp_finer = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+        cdt_coarse, cdp_coarse, cdt_fine, cdp_fine, d_fine, d_coarse = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
         for i, data in enumerate(loader):
             #data
             xyz = data[0][:, :, :6].to(device).float()  # partial: [B 2048, 6] include normals
             #model
             coarse, fine, finer = model(xyz)
-            coarse, fine = coarse[:, :, :3], fine[:, :, :3]
+            # coarse, fine = coarse[:, :, :3], fine[:, :, :3]
             #losses
             gt_xyz = data[1][:, :, :3].to(device).float()  # partial: [B 16348, 6]
-            if finer is not None:
-                finer = finer[:, :, :3]
-                cdp_finer += chamfer_loss_sqrt(finer, gt_xyz).item()  #inputs shd be BNC; cd_p
-                cdt_finer += chamfer_loss(finer, gt_xyz).item() 
-            else:
-                cdp_finer, cdt_finer = 0.0, 0.0
-            cdp_fine += chamfer_loss_sqrt(fine, gt_xyz).item()  #inputs shd be BNC; cd_p
-            cdp_coarse += chamfer_loss_sqrt(coarse, gt_xyz).item()  
-            cdt_fine += chamfer_loss(fine, gt_xyz).item()  # cd_t
-            cdt_coarse += chamfer_loss(coarse, gt_xyz).item()  
+            if args.tr_loss == 'dcd':
+                d_fine += density_cd(fine[:, :, :3], gt_xyz).item()  #inputs shd be BNC; cd_p
+                d_coarse += density_cd(coarse[:, :, :3], gt_xyz).item() 
+
+            cdp_fine += chamfer_loss_sqrt(fine[:, :, :3], gt_xyz).item()  #inputs shd be BNC; cd_p
+            cdp_coarse += chamfer_loss_sqrt(coarse[:, :, :3], gt_xyz).item()  
+            cdt_fine += chamfer_loss(fine[:, :, :3], gt_xyz).item()  # cd_t
+            cdt_coarse += chamfer_loss(coarse[:, :, :3], gt_xyz).item()  
 
             if rand_save and args.max_epoch == epoch and i==0:
-                if finer is not None:
-                    np.savez(str(args.file_dir) + '/rand_outs.npz', gt_pnts=gt_xyz.data.cpu().numpy(), 
-                                                                    final_pnts=finer.data.cpu().numpy(), 
-                                                                    fine_pnts=fine.data.cpu().numpy(), 
-                                                                    coarse_pnts=coarse.data.cpu().numpy(),
-                                                                    als_pnts=xyz.data.cpu().numpy()[:, :, :3])
-                else:
-                    np.savez(str(args.file_dir) + '/rand_outs.npz', gt_pnts=gt_xyz.data.cpu().numpy(),
-                                                                    final_pnts=fine.data.cpu().numpy(), 
-                                                                    coarse_pnts=coarse.data.cpu().numpy(),
-                                                                    als_pnts=xyz.data.cpu().numpy()[:, :, :3])
+                # if finer is not None:
+                #     np.savez(str(args.file_dir) + '/rand_outs.npz', gt_pnts=gt_xyz.data.cpu().numpy(), 
+                #                                                     final_pnts=finer.data.cpu().numpy(), 
+                #                                                     fine_pnts=fine.data.cpu().numpy(), 
+                #                                                     coarse_pnts=coarse.data.cpu().numpy(),
+                #                                                     als_pnts=xyz.data.cpu().numpy()[:, :, :3])
+                # else:
+                np.savez(str(args.file_dir) + '/rand_outs.npz', gt_pnts=gt_xyz.data.cpu().numpy(),
+                                                                final_pnts=fine.data.cpu().numpy(), 
+                                                                coarse_pnts=coarse.data.cpu().numpy(),
+                                                                als_pnts=xyz.data.cpu().numpy()[:, :, :3])
 
-    return {'finer_p': cdp_finer/num_iters, 'fine_p': cdp_fine/num_iters, 'coarse_p': cdp_coarse/num_iters, 'finer_t': cdt_finer/num_iters, 'fine_t': cdt_fine/num_iters, 'coarse_t': cdt_coarse/num_iters}
+    return {'fine_d': d_fine/num_iters, 'fine_p': cdp_fine/num_iters, 'coarse_p': cdp_coarse/num_iters, 'coarse_d': d_coarse/num_iters, 'fine_t': cdt_fine/num_iters, 'coarse_t': cdt_coarse/num_iters}
