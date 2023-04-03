@@ -458,7 +458,7 @@ def validate(model, loader, epoch, args, device, rand_save=False):
             cdt_fine += chamfer_loss(fine[:, :, :3], gt_xyz).item()  # cd_t
             cdt_coarse += chamfer_loss(coarse[:, :, :3], gt_xyz).item()  
 
-            if rand_save and args.max_epoch == epoch and i==0:
+            if rand_save and args.max_epoch == epoch and i in [0, 7, 15]:
                 # if finer is not None:
                 #     np.savez(str(args.file_dir) + '/rand_outs.npz', gt_pnts=gt_xyz.data.cpu().numpy(), 
                 #                                                     final_pnts=finer.data.cpu().numpy(), 
@@ -466,7 +466,7 @@ def validate(model, loader, epoch, args, device, rand_save=False):
                 #                                                     coarse_pnts=coarse.data.cpu().numpy(),
                 #                                                     als_pnts=xyz.data.cpu().numpy()[:, :, :3])
                 # else:
-                np.savez(str(args.file_dir) + '/rand_outs.npz', gt_pnts=gt_xyz.data.cpu().numpy(),
+                np.savez(str(args.file_dir) + f'/rand_outs{i}.npz', gt_pnts=gt_xyz.data.cpu().numpy(),
                                                                 final_pnts=fine.data.cpu().numpy(), 
                                                                 coarse_pnts=coarse.data.cpu().numpy(),
                                                                 als_pnts=xyz.data.cpu().numpy()[:, :, :3])

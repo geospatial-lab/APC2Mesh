@@ -11,7 +11,7 @@ from pathlib import Path
 import logging
 
 # Params - files
-chkpnt_path = '/outputs/experiments/2023-03-02_06-12/checkpoints/pccnet_130_0.01617_0.00072.pth'
+chkpnt_path = '/outputs/experiments/2023-03-21_08-01/checkpoints/pccnet_112_0.01676_0.00083.pth'
 
 experiment_dir = Path('/outputs/experiments/testing/')
 experiment_dir.mkdir(exist_ok=True)
@@ -48,8 +48,8 @@ torch.cuda.manual_seed(seed_value)
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
-tr_dataset = CustomDataset(split='train', npoints=npoints, device=device)
-tr_loader = data.DataLoader(tr_dataset, batch_size=bs, shuffle=True)
+# tr_dataset = CustomDataset(split='train', npoints=npoints, device=device)
+# tr_loader = data.DataLoader(tr_dataset, batch_size=bs, shuffle=True)
 
 ts_dataset = CustomDataset(split='test', npoints=npoints, device=device)
 ts_loader = data.DataLoader(ts_dataset, batch_size=bs, shuffle=False)
@@ -70,6 +70,8 @@ def testing(model, loader, file_dir, device, rand_save=False):
     with torch.no_grad():
         cdt_coarse, cdp_coarse, cdt_fine, cdp_fine, cdt_finer, cdp_finer = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
         for i, data in enumerate(loader):
+            print(i,'\n')
+            continue
             #data
             xyz = data[0][:, :, :6].to(device).float()  # partial: [B 2048, 6] include normals
 
@@ -90,7 +92,7 @@ def testing(model, loader, file_dir, device, rand_save=False):
             cdt_fine += chamfer_loss(fine[:, :, :3], gt_xyz).item()  # cd_t
             cdt_coarse += chamfer_loss(coarse[:, :, :3], gt_xyz).item()  
 
-            if rand_save and i==0:
+            if rand_save:
                 # if finer is not None:
                 #     np.savez(str(file_dir) + '/rand_outs.npz', gt_pnts=gt_xyz.data.cpu().numpy(), 
                 #                                                     final_pnts=finer.data.cpu().numpy(), 
@@ -115,6 +117,13 @@ test_logger.info('cdp_finer: %.6f | cdt_finer: %.6f |cdp_fine: %.6f | cdt_fine: 
                                                                             test_losses['fine_t'],
                                                                             test_losses['coarse_p'],
                                                                             test_losses['coarse_t']))
-
+# get file name and sequence for future de-normalization step.
+ts_fileseq = ts_loader.batch_sampler.sampler.data_source.mesh_list 
+# open file in write mode
+with open(str(file_dir)+'/ts_fileseq.txt', 'w') as fp:
+    for item in ts_fileseq:
+        # write each item on a new line
+        fp.write("%s\n" % item)
+    # print('Done')
 print('done ...')
 

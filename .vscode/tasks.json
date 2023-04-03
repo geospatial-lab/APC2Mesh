@@ -28,7 +28,7 @@
             ]
           },
         "python": {
-          "file": "main.py"
+          "file": "post_subnets/evals.py"
         }
       }
   ]

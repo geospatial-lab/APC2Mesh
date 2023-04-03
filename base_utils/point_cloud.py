@@ -1,4 +1,5 @@
 import numpy as np
+from plyfile import PlyData
 from base_utils import file_utils
 
 
@@ -9,6 +10,12 @@ def load_xyz(file_path):
     if num_nan_lines > 0:
         data = data[~nan_lines]  # filter rows with nan values
         print('Ignored {} points containing NaN coordinates in point cloud {}'.format(num_nan_lines, file_path))
+    return data
+
+def load_ply(file_path):
+    plydata = PlyData.read(file_path)
+    assert plydata.elements
+    data = (np.vstack((plydata['vertex']['x'], plydata['vertex']['y'], plydata['vertex']['z']))).T
     return data
 
 def write_xyz(file_path, points: np.ndarray, normals=None, colors=None):

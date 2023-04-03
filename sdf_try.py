@@ -40,10 +40,12 @@ def _clean_mesh(file_in, file_out, num_max_faces=None, enforce_solid=True):
     # large meshes might cause out-of-memory errors in signed distance calculation
     if num_max_faces is None:
         mesh.export(file_out)
+        print(file_out)
     elif len(mesh.faces) < num_max_faces:
         mesh.export(file_out)
+        print(file_out)
 
-def clean_meshes(dataset_dir, dir_in_meshes, dir_out, num_processes, num_max_faces=None, enforce_solid=True):
+def clean_meshes(in_dir, out_dir, dataset_dir, num_processes, num_max_faces=None, enforce_solid=True):
     """
     Try to repair meshes or filter broken ones. Enforce that meshes are solids to calculate signed distances.
     :param base_dir:
@@ -56,8 +58,8 @@ def clean_meshes(dataset_dir, dir_in_meshes, dir_out, num_processes, num_max_fac
     :return:
     """
 
-    dir_in_abs = os.path.join("/"+dataset_dir, dir_in_meshes)
-    dir_out_abs = os.path.join(dataset_dir, dir_out)
+    dir_in_abs = os.path.join(dataset_dir, in_dir)
+    dir_out_abs = os.path.join(dataset_dir, out_dir)
 
     os.makedirs(dir_out_abs, exist_ok=True)
 
@@ -119,12 +121,14 @@ def normalize_meshes(in_dir, out_dir, trans_dir, dataset_dir, num_processes=1):
 
     mesh_files = [f for f in os.listdir(in_dir_abs)
                  if os.path.isfile(os.path.join(in_dir_abs, f))]
+    temp = in_dir.split('/')[1]
     for fi, f in enumerate(mesh_files):
+        ff = f'{temp}_{f}'
         if f.endswith('.mtl'):
             continue
         in_file_abs = os.path.join(in_dir_abs, f)
-        out_file_abs = os.path.join(out_dir_abs, f)
-        trans_file_abs = os.path.join(trans_dir_abs, (f[:-4]+'.npz'))
+        out_file_abs = os.path.join(out_dir_abs, ff)
+        trans_file_abs = os.path.join(trans_dir_abs, (ff[:-4]+'.npz'))
 
         if not file_utils.call_necessary(in_file_abs, out_file_abs):
             continue
@@ -231,7 +235,10 @@ def get_sdf(in_dir, out_dir, dataset_dir, fix_sample_cnt, num_processes=1):
 
 def _normalize_als(file_in, file_out, trsf_file):
     # Load back in
-    als_pnts = point_cloud.load_xyz(file_in)
+    if os.path.splitext(file_in)[1]=='.xyz':
+        als_pnts = point_cloud.load_xyz(file_in)
+    elif os.path.splitext(file_in)[1]=='.ply':
+        als_pnts = point_cloud.load_ply(file_in)
     trsf_params = np.load(trsf_file)  
     scale = trsf_params['scale']
 
@@ -259,13 +266,15 @@ def normalize_als(in_dir, trsf_dir, out_dir, dataset_dir, num_processes=1):
     trsf_files = [os.path.splitext(f)[0] for f in os.listdir(trsf_dir_abs)
                  if os.path.isfile(os.path.join(trsf_dir_abs, f))]
 
+    temp = in_dir.split('/')[1]
     for fi, f in enumerate(xyz_files):
-        if not f[:-4] in trsf_files: # if trsf doesn't, then snt should be fine too.
+        ff = f'{temp}_{f}'
+        if not temp+'_'+f[:-4] in trsf_files: # if trsf doesn't, then snt should be fine too.
             print('WARNING: {}.npz is missing from the .xyz files list'.format(f[:-4]))
             continue 
         in_file_abs = os.path.join(in_dir_abs, f)
-        out_file_abs = os.path.join(out_dir_abs, (f[:-4]+'.txt'))
-        trsf_file_abs = os.path.join(trsf_dir_abs, (f[:-4]+'.npz'))
+        out_file_abs = os.path.join(out_dir_abs, (ff[:-4]+'.txt'))
+        trsf_file_abs = os.path.join(trsf_dir_abs, (ff[:-4]+'.npz'))
 
         if not file_utils.call_necessary(in_file_abs, out_file_abs):
             continue
@@ -473,48 +482,61 @@ def main():
     num_processes = 8
     fix_sample_cnt = 2048
 
-    # print("002 Try to repair meshes or filter broken ones. Ensure solid meshes for signed distance calculations")
-    # # solid here means: watertight, consistent winding, outward facing normals
-    # clean_meshes(dataset_dir=dataset_dir, dir_in_meshes="image_1_mesh", 
-    #              dir_out="02_cleaned_ply", num_processes=num_processes)
+    data_folders = os.listdir("/data/all_data")
 
-    print('003: scale and translate mesh, save transformation params.')
-    normalize_meshes(in_dir='image_1_mesh', out_dir='processed/%s/03_nnt_obj'%(fix_sample_cnt), 
-                     trans_dir='processed/%s/03_trsf_npz'%(fix_sample_cnt), dataset_dir=dataset_dir, 
-                     num_processes=num_processes)
+    for data_folder in data_folders:
+        df_dir = f'all_data/{data_folder}'
+        print('***', df_dir)
 
-    # print('004: generate complete query points set and their signed distances')
-    # get_sdf(in_dir='processed/%s/03_snt_obj'%(fix_sample_cnt), 
-    #         out_dir='processed/%s/04_query_npz'%(fix_sample_cnt), dataset_dir=dataset_dir, 
-    #         fix_sample_cnt=fix_sample_cnt, num_processes=num_processes)
+        # mesh_list = os.listdir(os.path.join(f'/data/all_data/{data_folder}/mesh'))
+        # xyz_list = os.listdir(os.path.join(f'/data/all_data/{data_folder}/xyz'))
+        # print('starting file count: {}'.format(len(os.listdir(f'/data/all_data/{data_folder}/xyz'))))
+        # for xyz_file in xyz_list:
+        #     if xyz_file[:-4]+'.obj' not in mesh_list:
+        #         print(data_folder, xyz_file)
 
-    print('005: adjust als points according to unit sphere mesh transformation params.')
-    normalize_als(in_dir='image_1_xyz', trsf_dir='processed/%s/03_trsf_npz'%(fix_sample_cnt), 
-                  out_dir='processed/%s/05_als_txt'%(fix_sample_cnt), dataset_dir=dataset_dir, 
-                  num_processes=num_processes)
+        # print("002 Try to repair meshes or filter broken ones. Ensure solid meshes for signed distance calculations")
+        # # solid here means: watertight, consistent winding, outward facing normals
+        # clean_meshes(in_dir=f'{df_dir}/mesh', out_dir="processed/%s/02_cleaned_ply"%(fix_sample_cnt),
+        #              dataset_dir=dataset_dir, num_processes=num_processes)
+
+        print('003: scale and translate mesh, save transformation params.')
+        normalize_meshes(in_dir=f'{df_dir}/mesh', out_dir='processed/%s/03_nnt_obj'%(fix_sample_cnt), 
+                        trans_dir='processed/%s/03_trsf_npz'%(fix_sample_cnt), dataset_dir=dataset_dir, 
+                        num_processes=num_processes)
+
+        # print('004: generate complete query points set and their signed distances')
+        # get_sdf(in_dir='processed/%s/03_snt_obj'%(fix_sample_cnt), 
+        #         out_dir='processed/%s/04_query_npz'%(fix_sample_cnt), dataset_dir=dataset_dir, 
+        #         fix_sample_cnt=fix_sample_cnt, num_processes=num_processes)
+
+        print('005: adjust als points according to unit sphere mesh transformation params.')
+        normalize_als(in_dir=f'{df_dir}/xyz', trsf_dir='processed/%s/03_trsf_npz'%(fix_sample_cnt), 
+                    out_dir='processed/%s/05_als_txt'%(fix_sample_cnt), dataset_dir=dataset_dir, 
+                    num_processes=num_processes)
 
     print('006a: scale down unit mesh.')
     scale_meshes(in_dir='processed/%s/03_nnt_obj'%(fix_sample_cnt), 
-                 out_dir='processed/%s/small03_nnt_obj'%(fix_sample_cnt), scale=0.95,
-                 dataset_dir=dataset_dir, num_processes=num_processes)
+                out_dir='processed/%s/small03_nnt_obj'%(fix_sample_cnt), scale=0.95,
+                dataset_dir=dataset_dir, num_processes=num_processes)
 
     print('006b: scale up unit mesh.')
     scale_meshes(in_dir='processed/%s/03_nnt_obj'%(fix_sample_cnt), 
-                 out_dir='processed/%s/big03_nnt_obj'%(fix_sample_cnt), scale=1.05,
-                 dataset_dir=dataset_dir, num_processes=num_processes)
+                out_dir='processed/%s/big03_nnt_obj'%(fix_sample_cnt), scale=1.05,
+                dataset_dir=dataset_dir, num_processes=num_processes)
 
     print('007: get als points outside small03_snt meshes & save to clean_als')
     get_clean_als(in_dir='processed/%s/05_als_txt'%(fix_sample_cnt), 
-                  s_mesh_dir='processed/%s/small03_nnt_obj'%(fix_sample_cnt), 
-                  b_mesh_dir='processed/%s/big03_nnt_obj'%(fix_sample_cnt),
-                  out_dir='processed/%s/clean_als_txt'%(fix_sample_cnt), 
-                  out_viz_dir='processed/%s/outlier_viz'%(fix_sample_cnt), dataset_dir=dataset_dir)
+                s_mesh_dir='processed/%s/small03_nnt_obj'%(fix_sample_cnt), 
+                b_mesh_dir='processed/%s/big03_nnt_obj'%(fix_sample_cnt),
+                out_dir='processed/%s/clean_als_txt'%(fix_sample_cnt), 
+                out_viz_dir='processed/%s/outlier_viz'%(fix_sample_cnt), dataset_dir=dataset_dir)
     
     print('008: up- or down-sample clean unit als to fixed count') 
     fix_sampling(als_dir='processed/%s/clean_als_txt'%(fix_sample_cnt),
-                 nmesh_dir='processed/%s/03_nnt_obj'%(fix_sample_cnt), 
-                 out_dir='processed/%s/fixed_als_txt'%(fix_sample_cnt), 
-                 dataset_dir=dataset_dir, fix_cnt=fix_sample_cnt, num_processes=1)
+                nmesh_dir='processed/%s/03_nnt_obj'%(fix_sample_cnt), 
+                out_dir='processed/%s/fixed_als_txt'%(fix_sample_cnt), 
+                dataset_dir=dataset_dir, fix_cnt=fix_sample_cnt, num_processes=1)
 
     print('done...')
 

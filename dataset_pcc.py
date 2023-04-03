@@ -22,16 +22,42 @@ class CustomDataset(Dataset):
         mesh_filelist = os.listdir(self.mesh_path)
         partial_filelist = os.listdir(self.partial_path)
 
-        assert len(mesh_filelist) == len(partial_filelist), "partial and mesh filelist count not the same, check!"
+        print('.obj <---> .npz file correspondence check')
+        print('starting file count: {}'.format(len(os.listdir(self.partial_path))))
+        for mesh_file in mesh_filelist:
+            if mesh_file[:-4]+'.txt.npz' not in partial_filelist:
+                os.remove(os.path.join(self.mesh_path, mesh_file))
+        print('final remaining file count: {}'.format(len(os.listdir(self.mesh_path))))
 
-        test_idx = random.sample(range(0, len(mesh_filelist)), test_split_cnt)
-        
-        self.mesh_list = self.nonIdxSelect(mesh_filelist, test_idx)
-        self.partial_list = self.nonIdxSelect(partial_filelist, test_idx)
+        assert len(os.listdir(self.mesh_path)) == len(partial_filelist), "partial and mesh filelist count not the same, check!"
+        mesh_filelist = os.listdir(self.mesh_path)
+
+        test_data_list = ['Tartu1', 'Tartu2', 'Tartu3']
+        self.ts_mesh_list, self.ts_partial_list, self.tr_mesh_list,self.tr_partial_list = [], [], [], []
+        for fname in partial_filelist:
+            dname = fname.split('_')[0]
+            if dname in test_data_list:
+                self.ts_mesh_list.append(fname[:-8]+'.obj')
+                self.ts_partial_list.append(fname)
+            else:
+                self.tr_mesh_list.append(fname[:-8]+'.obj')
+                self.tr_partial_list.append(fname)                    
+
+        if self.split == 'train':
+            self.mesh_list = self.tr_mesh_list
+            self.partial_list = self.tr_partial_list
+        else:
+            self.mesh_list = self.ts_mesh_list
+            self.partial_list = self.ts_partial_list
+
+        # test_idx = random.sample(range(0, len(mesh_filelist)), test_split_cnt)
+        # self.mesh_list = self.nonIdxSelect(mesh_filelist, test_idx)
+        # self.partial_list = self.nonIdxSelect(partial_filelist, test_idx)
 
     def __getitem__(self, index):
         partial_file = self.partial_list[index]
         mesh_file = self.mesh_list[index]
+        print(partial_file, " | ", mesh_file)
         partial_pc = np.load(os.path.join(self.partial_path, partial_file))['unit_als'][:,:]  # has normals
         mesh = trimesh.load(os.path.join(self.mesh_path, mesh_file))
         
@@ -58,7 +84,7 @@ class CustomDataset(Dataset):
         complete_normals = pointnet2_utils.gather_operation(surf_pnt_normals.permute(0,2,1).contiguous(), fps_idx.int())
         # t.toc('mesh/fps sampling + indexing took') #Time elapsed since t.tic()
         complete_pc = torch.cat((torch.squeeze(complete_pc), torch.squeeze(complete_normals)),0).permute(1,0) # add .copy() to this line and change variable name if previous line has more use down the line
-
+        print(partial_pc.shape)
         return torch.from_numpy(partial_pc), complete_pc
 
     def __len__(self):

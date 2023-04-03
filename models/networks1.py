@@ -144,7 +144,7 @@ class MeshEncoderDecoder(nn.Module):
         self.bn = nn.InstanceNorm2d(up_convs[-1])
 
     def forward(self, x, meshes):
-        fe, before_pool = self.encoder((x, meshes))
+        fe, before_pool = self.encoder((x, meshes)) #TODO: implies "fe" here will be a list of "fe" from each layer
         # mid_mesh = meshes[0].deep_copy()
         fe = self.decoder((fe, meshes), before_pool)
         fe = self.bn(fe.unsqueeze(-1))
@@ -167,15 +167,17 @@ class MeshEncoder(nn.Module):
 
     def forward(self, x):
         fe, meshes = x
-        encoder_outs = []
+        encoder_outs = [] 
+        #TODO: add fe_outs = []
         for conv in self.convs:
             fe, before_pool = conv((fe, meshes))
             encoder_outs.append(before_pool)
+            #TODO: add fe_outs.append(fe)
         return fe, encoder_outs
 
 
 class DownConv(nn.Module):
-    def __init__(self, in_channels, out_channels, blocks=0, pool=0, leaky=0):
+    def __init__(self, in_channels, out_channels, blocks=0, pool=0, leaky=0, attn=True):
         super(DownConv, self).__init__()
         self.leaky = leaky
         self.bn = []
@@ -190,6 +192,7 @@ class DownConv(nn.Module):
             self.bn = nn.ModuleList(self.bn)
         if pool:
             self.pool = MeshPool(pool)
+        self.attn = attn
 
     def forward(self, x):
         fe, meshes = x[0], x[1]
@@ -210,6 +213,8 @@ class DownConv(nn.Module):
         if self.pool:
             before_pool = x2
             x2 = self.pool(x2, meshes)
+        # if self.attn: #TODO:
+        #     before_pool = x2
         return x2, before_pool
 
 
@@ -287,6 +292,7 @@ class UpConv(nn.Module):
         if self.unroll:
             x1 = self.unroll(x1, meshes)
         if self.transfer_data:
+            #TODO: FA forward goes here as from_down = FA(from_down)
             x1 = torch.cat((x1, from_down), 1)
         x1 = self.conv1(x1, meshes)
         x1 = F.leaky_relu(x1, self.leaky)
