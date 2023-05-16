@@ -1,9 +1,13 @@
 '''classes and functions for pcc and p2m net evaluations'''
-import os, sys
+import os, sys, glob
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import numpy as np
 import open3d as o3d
 from scipy.spatial import cKDTree
 import trimesh
+from models.layers.mesh import Mesh
+from base_utils import mesh_utils
 
 def get_list_per_batch(bs, bseq):
     for i in range(0, len(bseq), bs):
@@ -17,7 +21,7 @@ def get_complete_files(blist, rt_dir, save_dir):
         print(f'File {rt_dir}/ts_fileseq.txt not found!', file=sys.stderr)
         return
 
-    if not os.path.exists(save_dir):
+    if not os.path.exists(f"{save_dir}/als"):
         os.makedirs(f"{save_dir}/gt") 
         os.makedirs(f"{save_dir}/fine")
         os.makedirs(f"{save_dir}/als")
@@ -116,35 +120,114 @@ def get_pcc_errors():
     pass
          
 def get_dist_losses(rec_list, gt_list):
+    xyz_errs, nml_errs = [], []
+    rec_list_dir = os.path.dirname(rec_list[0])
+    for gt_file in gt_list:
 
-    for (rec_file, gt_file) in zip(rec_list, gt_list):
+        rec_file = 'rec_'+ os.path.basename(gt_file)[:-4] +'.obj'
+        rec_file = os.path.join(rec_list_dir, rec_file)
+        if rec_file not in rec_list:
+            print(f'{rec_file} not found, skipping...')
+            continue
 
         gt = np.loadtxt(gt_file)
         # Pass gt's xyz to Open3D.o3d.geometry.PointCloud
-        gt_pcd = o3d.geometry.PointCloud()
-        gt_pcd.points = o3d.utility.Vector3dVector(gt)
+        # gt_pcd = o3d.geometry.PointCloud()
+        # gt_pcd.points = o3d.utility.Vector3dVector(gt[:,:3])
         # o3d.visualization.draw_geometries([gt_pcd])
 
-        # load and render mesh
-        mesh = o3d.io.read_triangle_mesh(rec_file)
-        # o3d.visualization.draw_geometries([mesh])
-        rec_pcd = mesh.sample_points_uniformly(number_of_points=16348)
-        # o3d.visualization.draw_geometries([rec_pcd])
+        # load mesh and sample from it
+        mesh = Mesh(rec_file, nml=False)
+        xyz, normals = mesh_utils.sample_surface(mesh.faces, mesh.vs.unsqueeze(0), 16348)
+        xyz = xyz.squeeze(0)
+        normals = normals.squeeze(0)
+        # convert to numpy array
+        xyz = xyz.cpu().numpy()
+        normals = normals.cpu().numpy()
 
-        tree = cKDTree(gt)
-        dist, idx = tree.query(np.asarray(rec_pcd.points), k=1)
-        euc_dist = np.sum(np.square(np.asarray(rec_pcd.points) - gt[idx,:]), axis=1)
-        # metric_out = np.sum(np.square(nbrs[:, :, 3:] - np.expand_dims(query_pnts, axis=1)[:, :, 3:]), axis=-1)
+        #re-normalize fine_pnts, bcoz some completed points could be out of the original [-1,+1] bounds
+        # xyz = normalize_txt(xyz)
+        
+        tree = cKDTree(gt[:,:3])
+        dist, idx = tree.query(np.asarray(xyz), k=1)
+        delta_sq = np.square(np.asarray(xyz) - gt[idx,:3])
+        euc_dist = np.sum(delta_sq, axis=1) 
+        delta_sq = np.square(np.asarray(normals) - gt[idx,3:])
+        nml_dist = np.sum(delta_sq, axis=1)
         euc_dist = np.sqrt(euc_dist).reshape(-1,1)
+        nml_dist = np.sqrt(nml_dist).reshape(-1,1)
 
-        #TODO: Add the error for normals
+        xyz_errs.append(np.mean(euc_dist))
+        nml_errs.append(np.mean(nml_dist))
 
         # dist_err_pcd = o3d.geometry.PointCloud()
         # dist_err_pcd.points = o3d.utility.Vector3dVector(gt)
         # o3d.visualization.draw_geometries([dist_err_pcd])
 
-        xyz_derr = np.column_stack([np.asarray(rec_pcd.points),euc_dist]) #derr: dist_err
+        dist_errs = np.column_stack([xyz,euc_dist,nml_dist]) #derr: dist_err
         fname = rec_file[:-4]+'.txt'
-        np.savetxt(fname, xyz_derr, fmt='%.6f %.6f %.6f %.6f')
+        np.savetxt(fname, dist_errs, fmt='%.6f %.6f %.6f %.6f %.6f')
+    
+    out = ['distancex error: {}'.format(np.mean(xyz_errs)), 'normal error: {}'.format(np.mean(nml_errs))]
+    fpath = os.path.dirname(rec_list[0])
+    with open(f'{fpath}/error_summary.txt', 'w') as f:
+        f.write('\n'.join(out))
+
+def get_per_instance_errors(gt_path, pcc_name, mesh_path):
+    gt_file = os.path.join(gt_path, f'{pcc_name}.txt')
+    gt = np.loadtxt(gt_file)
+
+    # load mesh and sample from it
+    mesh = Mesh(mesh_path, nml=False)
+    xyz, normals = mesh_utils.sample_surface(mesh.faces, mesh.vs.unsqueeze(0), 16348)
+    xyz = xyz.squeeze(0)
+    normals = normals.squeeze(0)
+    # convert to numpy array
+    xyz = xyz.cpu().numpy()
+    normals = normals.cpu().numpy()
+
+    tree = cKDTree(gt[:,:3])
+    dist, idx = tree.query(np.asarray(xyz), k=1)
+    delta_sq = np.square(np.asarray(xyz) - gt[idx,:3])
+    euc_dist = np.sum(delta_sq, axis=1) 
+    delta_sq = np.square(np.asarray(normals) - gt[idx,3:])
+    nml_dist = np.sum(delta_sq, axis=1)
+    euc_dist = np.sqrt(euc_dist).reshape(-1,1)
+    nml_dist = np.sqrt(nml_dist).reshape(-1,1)
+
+    print('distance error: ', np.mean(euc_dist))
+    print('normal error: ', np.mean(nml_dist))
+
+def get_per_scene_errors(mesh_err_dir):
+    mesh_err_files = glob.glob(f'{mesh_err_dir}/*.txt')
+    mesh_err_files = [os.path.basename(f) for f in mesh_err_files]
+    scenes = ['rec_Tartu1', 'rec_Tartu2', 'rec_Tartu3']
+    t1d, t1n, t2d, t2n, t3d, t3n = [], [], [], [], [], []
+    def read_mesh_err(mesh_err_file):
+        mesh_err = np.loadtxt(mesh_err_file)
+        xyz_err = (np.mean(mesh_err[:,3]))
+        nml_err = (np.mean(mesh_err[:,4]))
+        return xyz_err, nml_err
+
+    for mesh_err_file in mesh_err_files:
+        if mesh_err_file.startswith(scenes[0]):
+            mesh_err_file = os.path.join(mesh_err_dir, mesh_err_file)
+            d1, n1 = read_mesh_err(mesh_err_file)
+            t1d.append(d1)
+            t1n.append(n1)
+        elif mesh_err_file.startswith(scenes[1]):
+            mesh_err_file = os.path.join(mesh_err_dir, mesh_err_file)
+            d2, n2 = read_mesh_err(mesh_err_file)
+            t2d.append(d2)
+            t2n.append(n2)
+        elif mesh_err_file.startswith(scenes[2]):
+            mesh_err_file = os.path.join(mesh_err_dir, mesh_err_file)
+            d3, n3 = read_mesh_err(mesh_err_file)
+            t3d.append(d3)
+            t3n.append(n3)
+    del mesh_err_files
+    print('Tartu1 distance error: ', np.mean(t1d), 'normal error: ', np.mean(t1n))
+    print('Tartu2 distance error: ', np.mean(t2d), 'normal error: ', np.mean(t2n))
+    print('Tartu3 distance error: ', np.mean(t3d), 'normal error: ', np.mean(t3n))
 
 print('Done!!')

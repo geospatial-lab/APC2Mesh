@@ -51,7 +51,7 @@ device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 # tr_dataset = CustomDataset(split='train', npoints=npoints, device=device)
 # tr_loader = data.DataLoader(tr_dataset, batch_size=bs, shuffle=True)
 
-ts_dataset = CustomDataset(split='test', npoints=npoints, device=device)
+ts_dataset = CustomDataset(split='custom', npoints=npoints, device=device)
 ts_loader = data.DataLoader(ts_dataset, batch_size=bs, shuffle=False)
 
 pcc_model = PCCNet(kmax=20, code_dim=1024).to(device)
@@ -61,6 +61,7 @@ print('loaded model: %s' % chkpnt_path)
 
 t = TicToc() #create instance of class
 test_logger = start_logger(log_dir=log_dir, fname='test_log')
+test_logger.info('Creating "pcc fine" as point2poly training data')
 
 def testing(model, loader, file_dir, device, rand_save=False): 
     print("Testing ...")
@@ -70,8 +71,8 @@ def testing(model, loader, file_dir, device, rand_save=False):
     with torch.no_grad():
         cdt_coarse, cdp_coarse, cdt_fine, cdp_fine, cdt_finer, cdp_finer = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
         for i, data in enumerate(loader):
-            print(i,'\n')
-            continue
+            # print(i,'\n')
+            # continue
             #data
             xyz = data[0][:, :, :6].to(device).float()  # partial: [B 2048, 6] include normals
 

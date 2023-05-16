@@ -11,7 +11,7 @@ from typing import Tuple
 
 class Mesh:
 
-    def __init__(self, file, hold_history=False, vs=None, faces=None, device='cpu', gfmm=True):
+    def __init__(self, file, hold_history=False, vs=None, faces=None, device='cpu', gfmm=True, nml=True):
         if file is None:
             return
         self.filename = Path(file)
@@ -23,7 +23,8 @@ class Mesh:
             self.scale, self.translations = 1.0, np.zeros(3,)
         else:
             self.vs, self.faces = load(file)
-            self.normalize_unit_bb() 
+            if nml:
+                self.normalize_unit_bb()
         self.vs_in = copy.deepcopy(self.vs)
         self.v_mask = np.ones(len(self.vs), dtype=bool)
         self.build_gemm()

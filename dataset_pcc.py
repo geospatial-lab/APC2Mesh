@@ -1,4 +1,4 @@
-import os, random
+import os, random, glob
 import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -18,7 +18,7 @@ class CustomDataset(Dataset):
         self.mesh_path = os.path.join(data_path, '03_nnt_obj')
         self.partial_path = os.path.join(data_path, 'fixed_als_txt')  # file naming error, contained files are actually .npz 
 
-        """train/test split"""
+        """train/test/custom split"""
         mesh_filelist = os.listdir(self.mesh_path)
         partial_filelist = os.listdir(self.partial_path)
 
@@ -41,9 +41,28 @@ class CustomDataset(Dataset):
                 self.ts_partial_list.append(fname)
             else:
                 self.tr_mesh_list.append(fname[:-8]+'.obj')
-                self.tr_partial_list.append(fname)                    
+                self.tr_partial_list.append(fname)      
 
-        if self.split == 'train':
+        if self.split == 'custom':
+            ratio_dict = {'Loksa': 68, 'Paide': 171, 'Sillamae': 120,
+                        'Hiiumaa': 184, 'original': 132}
+            temp_mesh_list, temp_partial_list = [], []
+            for key, val in ratio_dict.items():
+                p_list = [i for i in self.tr_partial_list if key in i]
+                m_list = [i for i in self.tr_mesh_list if key in i]
+
+                # p_list = glob.glob(f'{self.partial_path}/{key}_*')
+                # m_list = glob.glob(f'{self.mesh_path}/{key}_*')
+                c = list(zip(p_list, m_list))
+
+                for a,b in random.sample(c, val):
+                    temp_partial_list.append(a)
+                    temp_mesh_list.append(b)
+                
+            self.tr_mesh_list = temp_mesh_list
+            self.tr_partial_list = temp_partial_list              
+
+        if self.split == 'train' or self.split == 'custom':
             self.mesh_list = self.tr_mesh_list
             self.partial_list = self.tr_partial_list
         else:

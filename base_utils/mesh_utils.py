@@ -1,7 +1,7 @@
 import numpy as np
 import uuid
 import trimesh
-import torch, os
+import torch, os, glob
 from typing import Tuple
 
 
@@ -43,6 +43,31 @@ def remesh(hull_mesh, num_faces):
     os.remove(simplified_file)
 
     return mesh["vertices"], mesh["faces"]
+
+def manifold_upsample(mesh, save_path, curr_fname, Mesh, num_faces=2000, res=3000, simplify=True):
+    # export before upsample
+    fname = os.path.join(save_path, '{}_{}.obj'.format(curr_fname,len(mesh.faces)))
+    mesh.export(fname)
+
+    temp_file = os.path.join(save_path, random_file_name('obj'))
+    opts = ' ' + str(res) if res is not None else ''
+
+    manifold_script_path = os.path.join(MANIFOLD_SOFTWARE_DIR, 'manifold')
+    if not os.path.exists(manifold_script_path):
+        raise FileNotFoundError(f'{manifold_script_path} not found')
+    cmd = "{} {} {}".format(manifold_script_path, fname, temp_file + opts)
+    os.system(cmd)
+
+    if simplify:
+        cmd = "{} -i {} -o {} -f {}".format(os.path.join(MANIFOLD_SOFTWARE_DIR, 'simplify'), temp_file,
+                                                             temp_file, num_faces)
+        os.system(cmd)
+
+    m_out = Mesh(temp_file, hold_history=True, device=mesh.device)
+    fname = os.path.join(save_path, '{}_{}.obj'.format(curr_fname,len(m_out.faces)))
+    m_out.export(fname)
+    [os.remove(_) for _ in list(glob.glob(os.path.splitext(temp_file)[0] + '*'))]
+    return m_out
 
 #*************************** LOAD/SAVE FILES *****************************#
 def save(file_name: str, vertices: np.ndarray, faces: np.ndarray) -> None:
