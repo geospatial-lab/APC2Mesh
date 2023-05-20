@@ -60,9 +60,18 @@ class CustomDataset(Dataset):
                     temp_mesh_list.append(b)
                 
             self.tr_mesh_list = temp_mesh_list
-            self.tr_partial_list = temp_partial_list              
-
-        if self.split == 'train' or self.split == 'custom':
+            self.tr_partial_list = temp_partial_list   
+            
+        if self.split.split('_')[0] == 'ablation':           
+            self.mesh_list = [i for i in self.tr_mesh_list if i.startswith('original')]
+            self.partial_list = [i for i in self.tr_partial_list if i.startswith('original')]
+            test_idx = random.sample(range(0, len(self.mesh_list)), test_split_cnt)
+            self.tr_mesh_list = self.nonIdxSelect(self.mesh_list, test_idx)
+            self.tr_partial_list = self.nonIdxSelect(self.partial_list, test_idx)
+        if self.split == 'train' or self.split == 'custom' or self.split.split('_')[1] == 'tr':
+            self.mesh_list = self.tr_mesh_list
+            self.partial_list = self.tr_partial_list
+        elif self.split.split('_')[1] == 'ts':
             self.mesh_list = self.tr_mesh_list
             self.partial_list = self.tr_partial_list
         else:
@@ -76,7 +85,7 @@ class CustomDataset(Dataset):
     def __getitem__(self, index):
         partial_file = self.partial_list[index]
         mesh_file = self.mesh_list[index]
-        print(partial_file, " | ", mesh_file)
+        # print(partial_file, " | ", mesh_file)
         partial_pc = np.load(os.path.join(self.partial_path, partial_file))['unit_als'][:,:]  # has normals
         mesh = trimesh.load(os.path.join(self.mesh_path, mesh_file))
         
@@ -103,7 +112,7 @@ class CustomDataset(Dataset):
         complete_normals = pointnet2_utils.gather_operation(surf_pnt_normals.permute(0,2,1).contiguous(), fps_idx.int())
         # t.toc('mesh/fps sampling + indexing took') #Time elapsed since t.tic()
         complete_pc = torch.cat((torch.squeeze(complete_pc), torch.squeeze(complete_normals)),0).permute(1,0) # add .copy() to this line and change variable name if previous line has more use down the line
-        print(partial_pc.shape)
+        # print(partial_pc.shape)
         return torch.from_numpy(partial_pc), complete_pc
 
     def __len__(self):
@@ -114,9 +123,9 @@ class CustomDataset(Dataset):
         list2arr = np.asarray(list_var)
         mask = np.ones(len(list_var), dtype=bool)
         mask[idx] = False
-        if self.split == 'train':
+        if self.split.split('_')[1] == 'tr':
             return list2arr[mask]
-        else: 
+        elif self.split.split('_')[1] == 'ts': 
             return list2arr[~mask]
 
     def index_points(self, points, idx):

@@ -28,7 +28,7 @@
             ]
           },
         "python": {
-          "file": "post_subnets/evals.py"
+          "file": "ablations/pcc.py"
         }
       }
   ]
