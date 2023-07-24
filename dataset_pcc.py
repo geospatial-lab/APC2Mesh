@@ -14,7 +14,8 @@ class CustomDataset(Dataset):
     def __init__(self, split='train', npoints=4096, test_split_cnt=40, device='cpu'):
         self.split = split
         self.device = device
-        data_path = '/data/processed/%d' %(npoints)
+        # data_path = '/data/processed/%s' %(str(npoints)+'s')
+        data_path = '/data/processed/%s' %(npoints)
         self.mesh_path = os.path.join(data_path, '03_nnt_obj')
         self.partial_path = os.path.join(data_path, 'fixed_als_txt')  # file naming error, contained files are actually .npz 
 

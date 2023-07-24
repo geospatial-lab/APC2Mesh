@@ -106,12 +106,12 @@ class PCEncoder(nn.Module):
         self.code_dim = kwargs['code_dim']
 
         '''convert layers 1 and 2 to single scale; if conditions to reset the ms_list to None'''
-        ms_list = [10,20] if self.multi_scale else None
+        ms_list = [16] if self.multi_scale else None
         # layer 1  
-        self.layer1 = ConvBlock(in_feat=self.cin*2, out_feat=64, kmax=30, ms_list=ms_list)
-        ms_list = [20] if self.multi_scale else None
+        self.layer1 = ConvBlock(in_feat=self.cin*2, out_feat=64, kmax=24, ms_list=ms_list)
+        ms_list = [16] if self.multi_scale else None
         # layer 2
-        self.layer2 = ConvBlock(in_feat=64*2, out_feat=128, kmax=30, ms_list=ms_list)
+        self.layer2 = ConvBlock(in_feat=64*2, out_feat=128, kmax=24, ms_list=ms_list)
 
         # layer 3 
         self.layer3 = nn.Sequential(nn.Conv2d(128*2, 128, kernel_size=1, bias=False),
@@ -452,9 +452,11 @@ def validate(model, loader, epoch, args, device, rand_save=False):
     print("Validating ...")
     model.eval()
     num_iters = len(loader)
+    from loss_pcc import emd_loss
 
+    # sinkhorn_loss = SinkhornDistance(eps=0.001, max_iter=100, thresh=1e-5, reduction='mean')
     with torch.no_grad():
-        cdt_coarse, cdp_coarse, cdt_fine, cdp_fine, d_fine, d_coarse = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+        cdt_coarse, cdp_coarse, cdt_fine, cdp_fine, e_fine, e_coarse = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
         for i, data in enumerate(loader):
             #data
             xyz = data[0][:, :, :6].to(device).float()  # partial: [B 2048, 6] include normals
@@ -465,9 +467,9 @@ def validate(model, loader, epoch, args, device, rand_save=False):
             # coarse, fine = coarse[:, :, :3], fine[:, :, :3]
             #losses
             gt_xyz = data[1][:, :, :3].to(device).float()  # partial: [B 16348, 6]
-            if args.tr_loss == 'dcd':
-                d_fine += density_cd(fine[:, :, :3], gt_xyz).item()  #inputs shd be BNC; cd_p
-                d_coarse += density_cd(coarse[:, :, :3], gt_xyz).item() 
+            if args.tr_loss == 'emd':
+                e_fine += emd_loss(fine[:, :, :3], gt_xyz, 'mean').item()  #inputs shd be BNC; cd_p
+                e_coarse += emd_loss(coarse[:, :, :3], gt_xyz, 'mean').item() 
 
             cdp_fine += chamfer_loss_sqrt(fine[:, :, :3], gt_xyz).item()  #inputs shd be BNC; cd_p
             cdp_coarse += chamfer_loss_sqrt(coarse[:, :, :3], gt_xyz).item()  
@@ -487,4 +489,4 @@ def validate(model, loader, epoch, args, device, rand_save=False):
                                                                 coarse_pnts=coarse.data.cpu().numpy(),
                                                                 als_pnts=xyz.data.cpu().numpy()[:, :, :3])
 
-    return {'fine_d': d_fine/num_iters, 'fine_p': cdp_fine/num_iters, 'coarse_p': cdp_coarse/num_iters, 'coarse_d': d_coarse/num_iters, 'fine_t': cdt_fine/num_iters, 'coarse_t': cdt_coarse/num_iters}
+    return {'fine_s': e_fine/num_iters, 'fine_p': cdp_fine/num_iters, 'coarse_p': cdp_coarse/num_iters, 'coarse_s': e_coarse/num_iters, 'fine_t': cdt_fine/num_iters, 'coarse_t': cdt_coarse/num_iters}

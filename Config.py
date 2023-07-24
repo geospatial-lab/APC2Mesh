@@ -8,7 +8,7 @@ class Args(object):
 
     # HParams - files
     fix_sample_cnt = 2048  # for now [2048, 4096] from sdf_try.py
-    data_path = "/data/processed/%s/net_outputs/pcc_out" %(fix_sample_cnt)
+    data_path = "/data/processed/%s/net_outputs/pcc_out/data" %(fix_sample_cnt)
     os.makedirs(data_path, exist_ok=True)
     pcc_npz_dir = "/outputs/experiments/testing/2023-03-29_23-26"
     p2m_logs = "/data/processed/2048/net_outputs/p2m_logs"

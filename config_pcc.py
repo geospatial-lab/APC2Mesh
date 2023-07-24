@@ -19,7 +19,7 @@ class Args(object):
     val_interval = 2  # run the validation model every ...
     # p2p_interval = 10
     # p2p = True
-    tr_loss = 'cd' # cd, dcd, emd
+    tr_loss = 'emd' # cdp, dcd, emd
     # t_alpha = 200
     # n_lambda = 0.5
 

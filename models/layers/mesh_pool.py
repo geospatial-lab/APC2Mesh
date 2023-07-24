@@ -32,7 +32,7 @@ class MeshPool(nn.Module):
         in_fe_sq = torch.sum(fe ** 2, dim=0)
         sorted, edge_ids = torch.sort(in_fe_sq, descending=True)
         edge_ids = edge_ids.tolist()
-        mask = np.ones(mesh.edges_count, dtype=np.bool)
+        mask = np.ones(mesh.edges_count, dtype=bool)
         edge_groups = MeshUnion(mesh.edges_count, self.__fe.device)
         while mesh.edges_count > self.__out_target:
             edge_id = edge_ids.pop()

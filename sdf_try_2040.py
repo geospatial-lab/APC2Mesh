@@ -506,63 +506,59 @@ def fix_sampling(als_dir, nmesh_dir, out_dir, dataset_dir, fix_cnt, num_processe
 def main():
     dataset_dir = "/data"
     num_processes = 8
-    fix_sample_cnt = '2048s'
+    fix_sample_cnt = 2048
 
-    data_folders = os.listdir("/data/all_data")
+    df_dir = 'all_data/original'
 
-    for data_folder in data_folders:
-        df_dir = f'all_data/{data_folder}'
-        print('***', df_dir)
+    mesh_list = os.listdir(f'/data/{df_dir}/mesh')
+    xyz_list = os.listdir(f'/data/{df_dir}/xyz')
+    print('starting file count: {}'.format(len(xyz_list)))
+    for xyz_file in xyz_list:
+        if xyz_file[:-4]+'.obj' not in mesh_list:
+            print(xyz_file)
 
-        mesh_list = os.listdir(f'/data/all_data/{data_folder}/mesh')
-        xyz_list = os.listdir(f'/data/all_data/{data_folder}/xyz')
-        print('starting file count: {}'.format(len(os.listdir(f'/data/all_data/{data_folder}/xyz'))))
-        for xyz_file in xyz_list:
-            if xyz_file[:-4]+'.obj' not in mesh_list:
-                print(data_folder, xyz_file)
+    print("002 Try to repair meshes or filter broken ones. Ensure solid meshes for signed distance calculations")
+    # solid here means: watertight, consistent winding, outward facing normals
+    clean_meshes(in_dir=f'{df_dir}/mesh', out_dir="processed/2048s/02_cleaned_ply",
+                 dataset_dir=dataset_dir, num_processes=num_processes)
 
-        print("002 Try to repair meshes or filter broken ones. Ensure solid meshes for signed distance calculations")
-        # solid here means: watertight, consistent winding, outward facing normals
-        clean_meshes(in_dir=f'{df_dir}/mesh', out_dir="processed/%s/02_cleaned_ply"%(fix_sample_cnt),
-                     dataset_dir=dataset_dir, num_processes=num_processes)
-
-        print('003: scale and translate mesh, save transformation params.')
-        normalize_meshes(in_dir=f'{df_dir}/mesh', out_dir='processed/%s/03_nnt_obj'%(fix_sample_cnt), 
-                        trans_dir='processed/%s/03_trsf_npz'%(fix_sample_cnt), dataset_dir=dataset_dir, 
-                        num_processes=num_processes)
-
-        # print('004: generate complete query points set and their signed distances')
-        # get_sdf(in_dir='processed/%s/03_snt_obj'%(fix_sample_cnt), 
-        #         out_dir='processed/%s/04_query_npz'%(fix_sample_cnt), dataset_dir=dataset_dir, 
-        #         fix_sample_cnt=fix_sample_cnt, num_processes=num_processes)
-
-        print('005: adjust als points according to unit sphere mesh transformation params.')
-        normalize_als(in_dir=f'{df_dir}/xyz', trsf_dir='processed/%s/03_trsf_npz'%(fix_sample_cnt), 
-                    out_dir='processed/%s/05_als_txt'%(fix_sample_cnt), dataset_dir=dataset_dir, 
+    print('003: scale and translate mesh, save transformation params.')
+    normalize_meshes(in_dir=f'{df_dir}/mesh', out_dir='processed/2048s/03_nnt_obj', 
+                    trans_dir='processed/2048s/03_trsf_npz', dataset_dir=dataset_dir, 
                     num_processes=num_processes)
 
+    # print('004: generate complete query points set and their signed distances')
+    # get_sdf(in_dir='processed/%s/03_snt_obj'%(fix_sample_cnt), 
+    #         out_dir='processed/%s/04_query_npz'%(fix_sample_cnt), dataset_dir=dataset_dir, 
+    #         fix_sample_cnt=fix_sample_cnt, num_processes=num_processes)
+
+    print('005: adjust als points according to unit sphere mesh transformation params.')
+    normalize_als(in_dir=f'{df_dir}/xyz', trsf_dir='processed/2048s/03_trsf_npz', 
+                out_dir='processed/2048s/05_als_txt', dataset_dir=dataset_dir, 
+                num_processes=num_processes)
+
     print('006a: scale down unit mesh.')
-    scale_meshes(in_dir='processed/%s/03_nnt_obj'%(fix_sample_cnt), 
-                out_dir='processed/%s/small03_nnt_obj'%(fix_sample_cnt), scale=0.95,
+    scale_meshes(in_dir='processed/2048s/03_nnt_obj', 
+                out_dir='processed/2048s/small03_nnt_obj', scale=0.95,
                 dataset_dir=dataset_dir, num_processes=num_processes)
 
     print('006b: scale up unit mesh.')
-    scale_meshes(in_dir='processed/%s/03_nnt_obj'%(fix_sample_cnt), 
-                out_dir='processed/%s/big03_nnt_obj'%(fix_sample_cnt), scale=1.05,
+    scale_meshes(in_dir='processed/2048s/03_nnt_obj', 
+                out_dir='processed/2048s/big03_nnt_obj', scale=1.05,
                 dataset_dir=dataset_dir, num_processes=num_processes)
 
-    print('007: get als points outside small03_nnt and inside big03_nnt meshes & save to clean_als')
-    get_clean_als(in_dir='processed/%s/05_als_txt'%(fix_sample_cnt), 
-                s_mesh_dir='processed/%s/small03_nnt_obj'%(fix_sample_cnt), 
-                b_mesh_dir='processed/%s/big03_nnt_obj'%(fix_sample_cnt),
-                out_dir='processed/%s/clean_als_txt'%(fix_sample_cnt), 
-                out_viz_dir='processed/%s/outlier_viz'%(fix_sample_cnt), dataset_dir=dataset_dir)
+    print('007: get als points outside small03_snt meshes & save to clean_als')
+    get_clean_als(in_dir='processed/2048s/05_als_txt', 
+                s_mesh_dir='processed/2048s/small03_nnt_obj', 
+                b_mesh_dir='processed/2048s/big03_nnt_obj',
+                out_dir='processed/2048s/clean_als_txt', 
+                out_viz_dir='processed/2048s/outlier_viz', dataset_dir=dataset_dir)
     
     print('008: up- or down-sample clean unit als to fixed count') 
-    fix_sampling(als_dir='processed/%s/clean_als_txt'%(fix_sample_cnt),
-                nmesh_dir='processed/%s/03_nnt_obj'%(fix_sample_cnt), 
-                out_dir='processed/%s/fixed_als_txt'%(fix_sample_cnt), 
-                dataset_dir=dataset_dir, fix_cnt=2048, num_processes=1)
+    fix_sampling(als_dir='processed/2048s/clean_als_txt',
+                nmesh_dir='processed/2048s/03_nnt_obj', 
+                out_dir='processed/2048s/fixed_als_txt', 
+                dataset_dir=dataset_dir, fix_cnt=fix_sample_cnt, num_processes=1)
 
     print('done...')
 

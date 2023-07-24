@@ -28,7 +28,7 @@
             ]
           },
         "python": {
-          "file": "ablations/pcc.py"
+          "file": "main.py"
         }
       }
   ]

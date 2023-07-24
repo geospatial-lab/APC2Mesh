@@ -1,33 +1,33 @@
 ARG IMAGE_NAME
-FROM ${IMAGE_NAME}:11.3.0-runtime-ubuntu20.04 as base
+FROM ${IMAGE_NAME}:11.3.1-runtime-ubuntu20.04 as base
 
-ENV NV_CUDA_LIB_VERSION "11.3.0-1"
+ENV NV_CUDA_LIB_VERSION "11.3.1-1"
 
 FROM base as base-amd64
 
-ENV NV_CUDA_CUDART_DEV_VERSION 11.3.58-1
+ENV NV_CUDA_CUDART_DEV_VERSION 11.3.109-1
 ENV NV_NVML_DEV_VERSION 11.3.58-1
-ENV NV_LIBCUSPARSE_DEV_VERSION 11.5.0.58-1
-ENV NV_LIBNPP_DEV_VERSION 11.3.3.44-1
+ENV NV_LIBCUSPARSE_DEV_VERSION 11.6.0.109-1
+ENV NV_LIBNPP_DEV_VERSION 11.3.3.95-1
 ENV NV_LIBNPP_DEV_PACKAGE libnpp-dev-11-3=${NV_LIBNPP_DEV_VERSION}
 
-ENV NV_LIBCUBLAS_DEV_VERSION 11.4.2.10064-1
+ENV NV_LIBCUBLAS_DEV_VERSION 11.5.1.109-1
 ENV NV_LIBCUBLAS_DEV_PACKAGE_NAME libcublas-dev-11-3
 ENV NV_LIBCUBLAS_DEV_PACKAGE ${NV_LIBCUBLAS_DEV_PACKAGE_NAME}=${NV_LIBCUBLAS_DEV_VERSION}
 
-ENV NV_NVPROF_VERSION 11.3.58-1
+ENV NV_NVPROF_VERSION 11.3.111-1
 ENV NV_NVPROF_DEV_PACKAGE cuda-nvprof-11-3=${NV_NVPROF_VERSION}
 
+
 ENV NV_LIBNCCL_DEV_PACKAGE_NAME libnccl-dev
-ENV NV_LIBNCCL_DEV_PACKAGE_VERSION 2.9.6-1
-ENV NCCL_VERSION 2.9.6-1
+ENV NV_LIBNCCL_DEV_PACKAGE_VERSION 2.9.9-1
+ENV NCCL_VERSION 2.9.9-1
 ENV NV_LIBNCCL_DEV_PACKAGE ${NV_LIBNCCL_DEV_PACKAGE_NAME}=${NV_LIBNCCL_DEV_PACKAGE_VERSION}+cuda11.3
 
 ARG TARGETARCH
 FROM base-amd64
 
 LABEL maintainer "NVIDIA CORPORATION <cudatools@nvidia.com>"
-
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libtinfo5 libncursesw5 \
     cuda-cudart-dev-11-3=${NV_CUDA_CUDART_DEV_VERSION} \
@@ -40,6 +40,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libcusparse-dev-11-3=${NV_LIBCUSPARSE_DEV_VERSION} \
     ${NV_LIBCUBLAS_DEV_PACKAGE} \
     ${NV_LIBNCCL_DEV_PACKAGE} \
+    # ${NV_CUDA_NSIGHT_COMPUTE_DEV_PACKAGE} \
     && rm -rf /var/lib/apt/lists/*
 
 # Keep apt from auto upgrading the cublas and nccl packages. See https://gitlab.com/nvidia/container-images/cuda/-/issues/88
@@ -196,9 +197,9 @@ RUN APT_INSTALL="apt-get install -y --no-install-recommends" && \
     apt-get autoremove && \
     rm -rf /var/lib/apt/lists/* /tmp/* ~/*
 
-RUN wget https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py38_cu113_pyt1121/pytorch3d-0.7.1-cp38-cp38-linux_x86_64.whl
+# RUN wget https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py38_cu113_pyt1121/pytorch3d-0.7.1-cp38-cp38-linux_x86_64.whl
 # RUN git submodule add https://github.com/ThibaultGROUEIX/ChamferDistancePytorch
-
+ENV SKLEARN_ALLOW_DEPRECATED_SKLEARN_PACKAGE_INSTALL True
 RUN PIP_INSTALL="python -m pip --no-cache-dir install --upgrade" && \
     $PIP_INSTALL \
         mesh-to-sdf \
@@ -206,7 +207,7 @@ RUN PIP_INSTALL="python -m pip --no-cache-dir install --upgrade" && \
         torch-sparse -f https://pytorch-geometric.com/whl/torch-1.12.1+cu113.html \
         torch-geometric \
         torch-cluster -f https://pytorch-geometric.com/whl/torch-1.12.1+cu113.html \
-        pytorch3d-0.7.1-cp38-cp38-linux_x86_64.whl \
+        # pytorch3d-0.7.1-cp38-cp38-linux_x86_64.whl \
         torch-summary \
         pytorch_warmup
 
@@ -234,17 +235,18 @@ RUN GIT_CLONE="git clone --recursive" && \
     make && \
     cd ../.. 
 
-
 # workdir is where u work in dockers
 # copy . /app copies content of ur supposed working dir to the docker wk dir
 WORKDIR /app
 COPY . /app
 
+RUN pip install pytorch3d-0.7.1-cp38-cp38-linux_x86_64.whl
 # RUN bash point_ops/compile_chamfer.sh
+# RUN bash point_ops/compile_emd.sh
 
 # if this works, try setup of pointnet2ops to reduce compilation time.
 
 RUN adduser -u 5678 --disabled-password --gecos "" appuser && chown -R appuser /app
 USER appuser
 
-CMD ["python", "ablations/pcc.py"]
+CMD ["python", "main.py"]

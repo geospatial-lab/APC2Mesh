@@ -7,7 +7,7 @@ from network import PCCNet, validate
 from point_ops.pointnet2_ops import pointnet2_utils as p2u
 # from torch.utils.tensorboard import SummaryWriter
 import pytorch_warmup as warmup
-from loss_pcc import chamfer_loss_sqrt, l2_normal_loss, density_cd
+from loss_pcc import chamfer_loss_sqrt, l2_normal_loss, density_cd, emd_loss
 from config_pcc import Args as args
 from config_pcc import start_logger
 from pytictoc import TicToc
@@ -26,8 +26,10 @@ tr_loader = data.DataLoader(tr_dataset, batch_size=args.bs, shuffle=True)
 ts_dataset = CustomDataset(split='ablation_ts', npoints=args.npoints, device=device)
 ts_loader = data.DataLoader(ts_dataset, batch_size=args.bs, shuffle=False)
 
-pcc_model = PCCNet(kmax=20, code_dim=1024, use_nmls=True, 
-                   multi_scale=False, attn_pool=True, fps_crsovr=True).to(device)
+pcc_model = PCCNet(kmax=24, code_dim=1024, use_nmls=True, 
+                   multi_scale=True, attn_pool=True, fps_crsovr=True).to(device)
+
+# sinkhorn_loss = SinkhornDistance(eps=1.0, max_iter=6, thresh=1e-5, reduction='mean')
 
 if args.load_chkpnt:
     optimizer = torch.optim.AdamW(pcc_model.parameters(), lr=args.fix_lr, betas=(0.9, 0.999),
@@ -47,8 +49,8 @@ llr_logger = start_logger(log_dir=args.log_dir, fname='lr_loss')
 if args.load_chkpnt:
     pcc_model.load_state_dict(torch.load(args.chkpnt_path))
     llr_logger.info('model loaded and training continues from: %s'%(args.chkpnt_path))
-llr_logger.info('ms:[10,20,30] | 256-trsf | 4heads | scale: x4 | bs: 8 | #ep: 140 |lr: 0.0006 | eta_min: 1e-07 | normals: Yes | #tr/ts: 2k/40 | tr_loss: %s' %(args.tr_loss))
-llr_logger.info('fps_crsovr: %s | attn_pool: %s | multiscale: %s | use_nmls: %s ' %(True, True, False, True))
+llr_logger.info('ms:[16,24] | 256-trsf | 4heads | scale: x4 | bs: 8 | #ep: 140 |lr: 0.0006 | eta_min: 1e-07 | normals: Yes | #tr/ts: 2k/40 | tr_loss: %s' %(args.tr_loss))
+llr_logger.info('fps_crsovr: %s | attn_pool: %s | multiscale: %s | use_nmls: %s ' %(True, True, True, True))
 # tb = SummaryWriter(comment=f'ms:[10,20,30] | 256-trsf | 4heads | scale: [x4, +ppconv]')
 
 init_epoch = int(args.chkpnt_path[-23:-20]) if args.load_chkpnt else 1
@@ -73,14 +75,30 @@ for epoch in range(init_epoch, max_epoch+1):
         gt_fine = p2u.gather_operation(gt_xyz.permute(0,2,1).contiguous(), p2u.furthest_point_sample(gt_xyz[:,:,:3].contiguous(), fine.size(1))).permute(0,2,1)
         if args.tr_loss == 'dcd':
             loss_fine = density_cd(fine[:, :, :3], gt_fine[:, :, :3], alpha=args.t_alpha, n_lambda=args.n_lambda)
-        elif args.tr_loss == 'cd':
-            loss_fine = chamfer_loss_sqrt(fine[:, :, :3], gt_fine[:, :, :3]) * 10  #inputs shd be BNC
-
+        elif args.tr_loss == 'cdp':
+            loss_fine = chamfer_loss_sqrt(fine[:, :, :3], gt_fine[:, :, :3]) * 10 #inputs shd be BNC
+        elif args.tr_loss == 'emd':
+            loss_fine = emd_loss(fine[:, :, :3], gt_fine[:, :, :3], 'mean')
+            if epoch < 3:
+                loss_fine = loss_fine * 0.001  
+            elif epoch > 2:
+                loss_fine = loss_fine * 0.01
+            elif epoch > 100:
+                loss_fine = loss_fine * 0.1
+        
         gt_coarse = p2u.gather_operation(gt_fine.permute(0,2,1).contiguous(), p2u.furthest_point_sample(gt_fine[:,:,:3].contiguous(), coarse.size(1))).permute(0,2,1)
         if args.tr_loss == 'dcd':
             loss_coarse = density_cd(coarse[:, :, :3], gt_coarse[:, :, :3], alpha=args.t_alpha, n_lambda=args.n_lambda)
-        elif args.tr_loss == 'cd':
-            loss_coarse = chamfer_loss_sqrt(coarse[:, :, :3], gt_coarse[:, :, :3]) * 10
+        elif args.tr_loss == 'cdp':
+            loss_coarse = chamfer_loss_sqrt(coarse[:, :, :3], gt_coarse[:, :, :3])
+        elif args.tr_loss == 'emd':
+            loss_coarse = emd_loss(coarse[:, :, :3], gt_coarse[:, :, :3], 'mean')
+            if epoch < 3:
+                loss_coarse = loss_coarse * 0.01  
+            elif epoch > 2:
+                loss_coarse = loss_coarse * 0.1
+            elif epoch > 100:
+                loss_coarse = loss_coarse * 1.0
         
         loss = loss_coarse + loss_fine
         if pcc_model.use_nmls:
@@ -128,9 +146,9 @@ for epoch in range(init_epoch, max_epoch+1):
         '''first two values after vEpoch will be zero if args.tr_loss == 'cd' '''
         llr_logger.info('vEpoch %.3d | %s_fine: %.6f | %s_coarse: %.6f |cdp_fine: %.6f | cdt_fine: %.6f | cdp_coarse: %.6f | cdt_coarse: %.6f' %(epoch,
                                                                                                         args.tr_loss,
-                                                                                                        val_losses['fine_d'], 
+                                                                                                        val_losses['fine_s'], 
                                                                                                         args.tr_loss,
-                                                                                                        val_losses['coarse_d'],
+                                                                                                        val_losses['coarse_s'],
                                                                                                         val_losses['fine_p'], 
                                                                                                         val_losses['fine_t'],
                                                                                                         val_losses['coarse_p'],
