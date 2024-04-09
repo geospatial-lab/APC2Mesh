@@ -1,12 +1,12 @@
 import torch
 import torch.nn as nn
 from point_ops.Chamfer3D.dist_chamfer_3D import chamfer_3DDist
-from point_ops.earth_movers_distance.emd import EarthMoverDistance
+# from point_ops.earth_movers_distance.emd import EarthMoverDistance
 from pytorch3d.ops.knn import knn_gather, knn_points
 from pytictoc import TicToc
 
 chamfer_distance = chamfer_3DDist()
-emd = EarthMoverDistance()
+# emd = EarthMoverDistance()
 
 def chamfer_loss(p1, p2):
     '''cd_t, L2 version of cd_p'''
@@ -24,19 +24,18 @@ def chamfer_loss_sqrt(p1, p2):
     return (d1 + d2) / 2
 
 
-def emd_loss(p1, p2, reduction='mean'):
-    '''
-    earth mover distance loss.
-    Args:
-        p1 (torch.tensor): [B, N, 6]
-        p2 (torch.tensor): [B, N, 6]
-    '''
-    dists = emd(p1, p2)
-    if reduction == 'mean':
-        return torch.mean(dists)
-    elif reduction == 'sum':
-        return torch.sum(dists)
-
+# def emd_loss(p1, p2, reduction='mean'):
+#     '''
+#     earth mover distance loss.
+#     Args:
+#         p1 (torch.tensor): [B, N, 6]
+#         p2 (torch.tensor): [B, N, 6]
+#     '''
+#     dists = emd(p1, p2)
+#     if reduction == 'mean':
+#         return torch.mean(dists)
+#     elif reduction == 'sum':
+#         return torch.sum(dists)
 
 
 def l2_normal_loss(ref, query):

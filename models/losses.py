@@ -1,10 +1,30 @@
 import torch
-import pytorch3d
-from pytorch3d.structures.pointclouds import Pointclouds
-from pytorch3d.loss import chamfer_distance
+from pytorch3d.structures import Pointclouds, Meshes
 from pytorch3d.ops.knn import knn_gather, knn_points
+from pytorch3d.loss import point_mesh_face_distance
 from typing import Union
 import torch.nn.functional as F
+
+def point_mesh_loss(points, mesh):
+    """
+    Args:
+        points: FloatTensor of shape (N, P, 3) giving a batch of N pointclouds
+            each with at most P points.
+        mesh: Meshes object representing a batch of N meshes.
+    Returns:
+        loss: Tensor of shape (N,) giving the mean distance from each point in
+            the batch to the nearest face in the corresponding mesh.
+    """
+    # convert points to Pointclouds
+    if points.ndim == 2:
+        points = points[None]
+    points = Pointclouds(points)
+    # convert mesh to Meshes
+    v = mesh.vs if mesh.vs.ndim == 3 else mesh.vs[None]
+    f = mesh.faces if mesh.faces.ndim == 3 else mesh.faces[None]
+    mesh = Meshes(verts=v, faces=f)
+
+    return point_mesh_face_distance(mesh, points) # you can try mean reduction by adding '/2' here
 
 def _validate_chamfer_reduction_inputs(
     batch_reduction: Union[str, None], point_reduction: str

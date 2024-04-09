@@ -152,8 +152,8 @@ def normalize_meshes(in_dir, out_dir, trans_dir, dataset_dir, num_processes=1):
 
         call_params += [(in_file_abs, out_file_abs, trans_file_abs)]
 
-    # mp_utils.start_process_pool(_normalize_mesh, call_params, num_processes)
-    mp_utils.start_process_pool(_translate_mesh, call_params, num_processes)
+    mp_utils.start_process_pool(_normalize_mesh, call_params, num_processes)
+    # mp_utils.start_process_pool(_translate_mesh, call_params, num_processes)
 
 def denormalize(normalized_data, scale, centroid):
    # un-normalize the data
@@ -506,11 +506,13 @@ def fix_sampling(als_dir, nmesh_dir, out_dir, dataset_dir, fix_cnt, num_processe
 def main():
     dataset_dir = "/data"
     num_processes = 8
-    fix_sample_cnt = '2048s'
+    fix_sample_cnt = '3072' # 1024, 2048, 3072, 4096
 
     data_folders = os.listdir("/data/all_data")
 
     for data_folder in data_folders:
+        if data_folder != 'Haapsalu':
+            continue
         df_dir = f'all_data/{data_folder}'
         print('***', df_dir)
 
@@ -520,6 +522,13 @@ def main():
         for xyz_file in xyz_list:
             if xyz_file[:-4]+'.obj' not in mesh_list:
                 print(data_folder, xyz_file)
+        print('#######################################')
+        for mesh_file in mesh_list:
+            if mesh_file[:-4]+'.ply' not in xyz_list:
+                print(data_folder, mesh_file)
+        #         os.remove(f'{dataset_dir}/{df_dir}/mesh/{mesh_file}')
+        # print('xyz: {} | mesh: {}'.format(len(os.listdir(f'/data/all_data/{data_folder}/xyz')),
+        #                                   len(os.listdir(f'/data/all_data/{data_folder}/mesh'))))
 
         print("002 Try to repair meshes or filter broken ones. Ensure solid meshes for signed distance calculations")
         # solid here means: watertight, consistent winding, outward facing normals

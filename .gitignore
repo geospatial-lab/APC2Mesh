@@ -131,3 +131,9 @@ dmypy.json
 # manual additions
 seedformer
 results/experiments
+models/networks.py
+docker-compose.yml
+docker-compose.debug.yml
+Dockerfile
+Dockerfile20110
+trials.py

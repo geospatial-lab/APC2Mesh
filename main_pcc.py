@@ -1,7 +1,7 @@
 import torch, random
 from dataset_pcc import CustomDataset
 from torch.utils import data
-from network import PCCNet, validate
+from network_pcc import PCCNet, validate
 from point_ops.pointnet2_ops import pointnet2_utils as p2u
 # from torch.utils.tensorboard import SummaryWriter
 import pytorch_warmup as warmup

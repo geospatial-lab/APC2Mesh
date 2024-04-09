@@ -1,6 +1,14 @@
 import numpy as np
 import os
 
+def save_args(args):
+    file = open(os.path.join(args.log_dir, 'args.txt'), "w")
+    for k, v in vars(args).items():
+        if k in ['__dict__', '__weakref__', '__doc__']:
+            continue
+        file.write(f"{k}:\t {v}\n")
+    file.close()
+
 def read_transformation(denorm_file_abs):
     with open(denorm_file_abs) as f:
         trans = f.read().splitlines()

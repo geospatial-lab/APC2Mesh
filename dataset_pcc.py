@@ -11,13 +11,15 @@ t = TicToc() #create instance of class
 
 class CustomDataset(Dataset):
 
-    def __init__(self, split='train', npoints=4096, test_split_cnt=40, device='cpu'):
+    def __init__(self, split='train', npoints=2048, test_split_cnt=40, device='cpu'):
         self.split = split
         self.device = device
-        # data_path = '/data/processed/%s' %(str(npoints)+'s')
         data_path = '/data/processed/%s' %(npoints)
-        self.mesh_path = os.path.join(data_path, '03_nnt_obj')
+        self.mesh_path = '/data/processed/2048/03_nnt_obj'
+        # self.mesh_path = os.path.join(data_path, '03_nnt_obj')
         self.partial_path = os.path.join(data_path, 'fixed_als_txt')  # file naming error, contained files are actually .npz 
+        self.cmplx_path = '/app/ablations/complex_tall.txt'
+        self.a2p_il_path = '/app/ablations/a2p_il.txt'
 
         """train/test/custom split"""
         mesh_filelist = os.listdir(self.mesh_path)
@@ -75,7 +77,15 @@ class CustomDataset(Dataset):
         elif self.split.split('_')[1] == 'ts':
             self.mesh_list = self.tr_mesh_list
             self.partial_list = self.tr_partial_list
-        else:
+        elif self.split == 'test_cmplx':
+            cmplx_filelist = open(self.cmplx_path, 'r').read().splitlines()
+            self.mesh_list = [i for i in self.tr_mesh_list if i in cmplx_filelist]
+            self.partial_list = [i for i in self.tr_partial_list if i[:-8]+'.obj' in cmplx_filelist]
+        elif self.split == 'a2p_il_ablation':
+            sel_flist = open(self.a2p_il_path, 'r').read().splitlines()
+            self.mesh_list = [i for i in mesh_filelist if i[:-4] in sel_flist]
+            self.partial_list = [i for i in partial_filelist if i[:-8] in sel_flist]
+        else: # 'full_test
             self.mesh_list = self.ts_mesh_list
             self.partial_list = self.ts_partial_list
 
@@ -85,8 +95,8 @@ class CustomDataset(Dataset):
 
     def __getitem__(self, index):
         partial_file = self.partial_list[index]
-        mesh_file = self.mesh_list[index]
-        # print(partial_file, " | ", mesh_file)
+        mesh_file = partial_file[:-8]+'.obj' #self.mesh_list[index]
+        print(partial_file, " | ", mesh_file)
         partial_pc = np.load(os.path.join(self.partial_path, partial_file))['unit_als'][:,:]  # has normals
         mesh = trimesh.load(os.path.join(self.mesh_path, mesh_file))
         

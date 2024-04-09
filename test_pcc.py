@@ -1,7 +1,7 @@
 import torch, random
 from dataset_pcc import CustomDataset
 from torch.utils import data
-from network import PCCNet
+from ablations.network import PCCNet
 # from point_ops.pointnet2_ops import pointnet2_utils as p2u
 from loss_pcc import chamfer_loss_sqrt, chamfer_loss
 from pytictoc import TicToc
@@ -11,7 +11,9 @@ from pathlib import Path
 import logging
 
 # Params - files
-chkpnt_path = '/outputs/experiments/2023-03-21_08-01/checkpoints/pccnet_112_0.01676_0.00083.pth'
+chkpnt_path = '/outputs/experiments/2023-03-21_08-01/checkpoints/pccnet_112_0.01676_0.00083.pth' # full 10k dataset trained
+# chkpnt_path = '/outputs/experiments/2023-05-17_07-06/checkpoints/pccnet_136_0.01926_0.00111.pth' # ablation tr nmls: no
+# chkpnt_path = '/outputs/experiments/ISPRS_R1/2023-10-09_22-30/checkpoints/pccnet_134_0.01810_0.00099.pth' # ablation 1024 input
 
 experiment_dir = Path('/outputs/experiments/testing/')
 experiment_dir.mkdir(exist_ok=True)
@@ -48,20 +50,23 @@ torch.cuda.manual_seed(seed_value)
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
-# tr_dataset = CustomDataset(split='train', npoints=npoints, device=device)
-# tr_loader = data.DataLoader(tr_dataset, batch_size=bs, shuffle=True)
+ts_dataset = CustomDataset(split='a2p_il_ablation', npoints=npoints, device=device) #'full_test' 'test_cmplx' 'a2p_il_ablation'
+ts_loader = data.DataLoader(ts_dataset, batch_size=bs, shuffle=True)
 
-ts_dataset = CustomDataset(split='custom', npoints=npoints, device=device)
-ts_loader = data.DataLoader(ts_dataset, batch_size=bs, shuffle=False)
+# ts_dataset = CustomDataset(split='custom', npoints=npoints, device=device)
+# ts_loader = data.DataLoader(ts_dataset, batch_size=bs, shuffle=False)
 
-pcc_model = PCCNet(kmax=20, code_dim=1024).to(device)
+pcc_model = PCCNet(kmax=20, code_dim=1024, use_nmls=True, 
+                   multi_scale=True, attn_pool=True, fps_crsovr=True).to(device)
 
 pcc_model.load_state_dict(torch.load(chkpnt_path))
-print('loaded model: %s' % chkpnt_path)
 
 t = TicToc() #create instance of class
 test_logger = start_logger(log_dir=log_dir, fname='test_log')
-test_logger.info('Creating "pcc fine" as point2poly training data')
+# test_logger.info('Creating "pcc fine" as point2poly training data')
+test_logger.info('a2p_il ablation: 4096 pcc output for selected 2048 input files')
+test_logger.info('all optimal configs reported maintained')
+test_logger.info('loaded model: %s' % chkpnt_path)
 
 def testing(model, loader, file_dir, device, rand_save=False): 
     print("Testing ...")
@@ -75,7 +80,8 @@ def testing(model, loader, file_dir, device, rand_save=False):
             # continue
             #data
             xyz = data[0][:, :, :6].to(device).float()  # partial: [B 2048, 6] include normals
-
+            if not pcc_model.use_nmls:
+                xyz = xyz[:, :, :3]
             #model
             coarse, fine, finer = model(xyz)
             # coarse, fine = coarse[:, :, :3], fine[:, :, :3]

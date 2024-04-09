@@ -230,4 +230,13 @@ def get_per_scene_errors(mesh_err_dir):
     print('Tartu2 distance error: ', np.mean(t2d), 'normal error: ', np.mean(t2n))
     print('Tartu3 distance error: ', np.mean(t3d), 'normal error: ', np.mean(t3n))
 
+
+def config3_per_instance_error(fname):
+    cfg_dir = '/data/processed/2048/net_outputs/p2m_rec_obj/config-f3'
+    data = np.loadtxt(f'{cfg_dir}/rec_{fname}.txt')
+    perr = np.mean(data[:,3])
+    derr = np.mean(data[:,4])
+    return perr, derr
+
+
 print('Done!!')

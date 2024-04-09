@@ -8,9 +8,9 @@ class Args(object):
 
     # HParams - files
     fix_sample_cnt = 2048  # for now [2048, 4096] from sdf_try.py
-    data_path = "/data/processed/%s/net_outputs/pcc_out/data" %(fix_sample_cnt)
+    data_path = "/data/processed/%s/net_outputs/pcc_out/a2p_il_fine" %(fix_sample_cnt) # ; /fine_cmplx
     os.makedirs(data_path, exist_ok=True)
-    pcc_npz_dir = "/outputs/experiments/testing/2023-03-29_23-26"
+    # pcc_npz_dir = "/outputs/experiments/testing/2023-10-04_23-14" #2023-11-03_01-03: cmplx; 2023-10-04_23-14: _no_nmls; 2023-03-29_23-26: original
     p2m_logs = "/data/processed/2048/net_outputs/p2m_logs"
     os.makedirs(p2m_logs, exist_ok=True)
     save_path = "/data/processed/%s/net_outputs/p2m_rec_obj" %(fix_sample_cnt)
@@ -22,7 +22,7 @@ class Args(object):
     initial_mesh = None  # if available, replace this with path
     initial_num_faces = 3000
     init_samples = 4000
-    attention = 'KVQ L2 normalization' #'KVQ L2 normalization'  # [KVQ div(sqrt(cv))] attention type
+    attention = 'None' #'KVQ L2 normalization'  # [KVQ div(sqrt(cv))] attention type
     iterations = 998
     upsamp = 500  # upsample each {upsamp}th iteration
     max_faces = 4000  # maximum number of faces to upsample to

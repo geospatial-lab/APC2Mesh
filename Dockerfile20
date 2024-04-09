@@ -34,7 +34,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     cuda-command-line-tools-11-3=${NV_CUDA_LIB_VERSION} \
     cuda-minimal-build-11-3=${NV_CUDA_LIB_VERSION} \
     cuda-libraries-dev-11-3=${NV_CUDA_LIB_VERSION} \
-    # cuda-nvml-dev-11-3=${NV_NVML_DEV_VERSION} \
+    cuda-nvml-dev-11-3=${NV_NVML_DEV_VERSION} \
     # ${NV_NVPROF_DEV_PACKAGE} \
     ${NV_LIBNPP_DEV_PACKAGE} \
     libcusparse-dev-11-3=${NV_LIBCUSPARSE_DEV_VERSION} \
@@ -203,10 +203,10 @@ ENV SKLEARN_ALLOW_DEPRECATED_SKLEARN_PACKAGE_INSTALL True
 RUN PIP_INSTALL="python -m pip --no-cache-dir install --upgrade" && \
     $PIP_INSTALL \
         mesh-to-sdf \
-        torch-scatter -f https://pytorch-geometric.com/whl/torch-1.12.1+cu113.html \
-        torch-sparse -f https://pytorch-geometric.com/whl/torch-1.12.1+cu113.html \
-        torch-geometric \
-        torch-cluster -f https://pytorch-geometric.com/whl/torch-1.12.1+cu113.html \
+        # torch-scatter -f https://pytorch-geometric.com/whl/torch-1.12.1+cu113.html \
+        # torch-sparse -f https://pytorch-geometric.com/whl/torch-1.12.1+cu113.html \
+        # torch-geometric \
+        # torch-cluster -f https://pytorch-geometric.com/whl/torch-1.12.1+cu113.html \
         # pytorch3d-0.7.1-cp38-cp38-linux_x86_64.whl \
         torch-summary \
         pytorch_warmup
@@ -235,12 +235,15 @@ RUN GIT_CLONE="git clone --recursive" && \
     make && \
     cd ../.. 
 
+WORKDIR /app
+COPY pytorch3d-0.7.1-cp38-cp38-linux_x86_64.whl pytorch3d-0.7.1-cp38-cp38-linux_x86_64.whl
+RUN pip install pytorch3d-0.7.1-cp38-cp38-linux_x86_64.whl
 # workdir is where u work in dockers
 # copy . /app copies content of ur supposed working dir to the docker wk dir
-WORKDIR /app
-COPY . /app
 
-RUN pip install pytorch3d-0.7.1-cp38-cp38-linux_x86_64.whl
+# comment out the following lines if u want to build image and commit it to dockerhub
+COPY . .
+
 # RUN bash point_ops/compile_chamfer.sh
 # RUN bash point_ops/compile_emd.sh
 
@@ -249,4 +252,4 @@ RUN pip install pytorch3d-0.7.1-cp38-cp38-linux_x86_64.whl
 RUN adduser -u 5678 --disabled-password --gecos "" appuser && chown -R appuser /app
 USER appuser
 
-CMD ["python", "main.py"]
+CMD ["python", "test_pcc.py"]

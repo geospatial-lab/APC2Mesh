@@ -5,7 +5,7 @@ from pathlib import Path
 class Args(object):
 
     # HParams - files
-    experiment_dir = Path('/outputs/experiments/')
+    experiment_dir = Path('/outputs/experiments/ISPRS_R1')
     experiment_dir.mkdir(exist_ok=True)
     file_dir = Path(str(experiment_dir) + '/' + str(datetime.now().strftime('%Y-%m-%d_%H-%M')))
     file_dir.mkdir(exist_ok=True)
@@ -19,7 +19,7 @@ class Args(object):
     val_interval = 2  # run the validation model every ...
     # p2p_interval = 10
     # p2p = True
-    tr_loss = 'emd' # cdp, dcd, emd
+    tr_loss = 'cdp' # cdp, dcd, emd
     # t_alpha = 200
     # n_lambda = 0.5
 
@@ -30,7 +30,7 @@ class Args(object):
     wd = 0.01  # weight decay (AdamW default)
     max_epoch = 140
     bs = 8  # batch_size
-    npoints = 2048
+    npoints = 2048  # number of input points
 
     #HParams - chkpnting
     load_chkpnt = False
