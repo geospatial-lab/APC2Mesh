@@ -23,4 +23,22 @@ APC2Mesh/
 
 ```
 
-I
+### Prerequisites
+The necessary python packages and environmental settings we used in building this project can be found in `Dockerfile20`
+
+### Citation
+If you use APC2Mesh in a scientific work, please consider citing the paper:
+
+``` bibtex
+@article{akwensi2024apc2mesh,
+  title = {APC2Mesh: Bridging the gap from occluded building façades to full 3D models},
+  journal = {ISPRS Journal of Photogrammetry and Remote Sensing},
+  volume = {211},
+  pages = {438-451},
+  year = {2024},
+  issn = {0924-2716},
+  doi = {https://doi.org/10.1016/j.isprsjprs.2024.04.009},
+  url = {https://www.sciencedirect.com/science/article/pii/S0924271624001692},
+  author = {Perpetual Hope Akwensi and Akshay Bharadwaj and Ruisheng Wang}
+}
+```
