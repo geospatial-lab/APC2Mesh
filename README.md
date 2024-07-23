@@ -24,7 +24,10 @@ APC2Mesh/
 ```
 
 ### Prerequisites
-The necessary python packages and environmental settings we used in building this project can be found in `Dockerfile20`
+The necessary python packages and environmental settings we used in building this project can be found in `Dockerfile20`.
+To run this repo, either:
+  1. Use the packages and environmental specifications from the dockerfile to create your own local workspace OR
+  2. build the Dockerfile and run the project in a Docker container.
 
 ### Citation
 If you use APC2Mesh in a scientific work, please consider citing the paper:
