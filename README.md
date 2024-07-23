@@ -13,16 +13,14 @@ APC2Mesh/
 │
 ├── README.md # Project documentation
 ├── sdf_try.py # The python script for pre-processing the files in `sample-data`
-├── dataset_pcc.py # The python script for the custom dataloader
-├── src/ # Source code
-│ ├── main.py
-│ ├── module1.py
-│ └── module2.py
-├── tests/ # Test files
-│ ├── test_main.py
-│ └── test_module1.py
-└── Dockerfile20 #
+├── dataset_pcc.py # The python script for the custom dataloader for point completion task
+├── .vscode/ # Source code
+│ └── tasks.json
+├── ablations/ # Test files
+│ └── pcc.py # script used to train point completion model
+├── main.py # script used to run the reconstruction phase of the project
+└── Dockerfile20 # Used in conjunction with `.vscode\tasks.json` to run project in Docker
 
 ```
 
-###Data Preprocessing
+I
